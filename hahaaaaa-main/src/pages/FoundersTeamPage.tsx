@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
 import {
   useCallback,
@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from "react";
-import { ChevronDown, ChevronUp, GripVertical, Instagram, Linkedin, Pencil, Plus, Trash2, X } from "lucide-react";
+import { CalendarDays, GripVertical, Instagram, Linkedin, Pencil, Plus, Trash2, X } from "lucide-react";
 import { buildAuthRequestInit } from "../auth/fetchWithAuth";
 import { useAuth } from "../context/AuthContext";
 import { reorderMembersById } from "../components/teamUtils";
@@ -18,7 +18,7 @@ import { reorderMembersById } from "../components/teamUtils";
 const STORAGE_KEY = "ikshana-leadership-members";
 const LEADERSHIP_RESET_KEY = "ikshana-leadership-reset-complete";
 
-type LeadershipCategory = "founders" | "currentBoard" | "previousBoard";
+type LeadershipCategory = "founders" | "currentBoard" | "previousBoard" | "volunteers";
 
 interface LeadershipMember {
   id: string;
@@ -429,7 +429,8 @@ export default function FoundersTeamPage() {
   const [loading, setLoading] = useState(true);
   const [showAddMemberForm, setShowAddMemberForm] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
-  const [viewMoreByCategory, setViewMoreByCategory] = useState<Record<LeadershipCategory, boolean>>({ founders: true, currentBoard: true, previousBoard: true });
+  const [activeSection, setActiveSection] = useState<LeadershipCategory>("founders");
+  const [selectedPreviousBatch, setSelectedPreviousBatch] = useState("");
   const [draggedMemberId, setDraggedMemberId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -457,7 +458,10 @@ export default function FoundersTeamPage() {
         if (Array.isArray(data)) {
           const mapped: LeadershipMember[] = data.map((item, index) => {
             const category: LeadershipCategory =
-              item.category === "founders" || item.category === "currentBoard" || item.category === "previousBoard"
+              item.category === "founders" ||
+              item.category === "currentBoard" ||
+              item.category === "previousBoard" ||
+              item.category === "volunteers"
                 ? item.category
                 : "founders";
 
@@ -465,7 +469,15 @@ export default function FoundersTeamPage() {
             return {
               id: String(item.id),
               name: item.name || "Leadership Member",
-              role: item.role || (category === "founders" ? "Founder" : category === "previousBoard" ? "Former Board Member" : "Executive Board Member"),
+              role:
+                item.role ||
+                (category === "founders"
+                  ? "Founder"
+                  : category === "previousBoard"
+                    ? "Former Board Member"
+                    : category === "volunteers"
+                      ? "Volunteer"
+                      : "Executive Board Member"),
               tenure: item.tenure || "2026",
               bio: rawBio,
               image: item.image || createAvatar(item.name || "Member", "#8b1d3b"),
@@ -735,7 +747,7 @@ export default function FoundersTeamPage() {
 
   const handleDeleteMember = async (memberId: string) => {
     const targetMember = leadershipMembers.find((item) => item.id === memberId);
-    
+
     const updated = leadershipMembers.filter((item) => item.id !== memberId);
     const sorted = updated.slice().sort((a, b) => a.displayOrder - b.displayOrder);
     setLeadershipMembers(sorted);
@@ -808,121 +820,22 @@ export default function FoundersTeamPage() {
     return value.startsWith("http://") || value.startsWith("https://") ? value : `https://${value}`;
   };
 
-  const founders = leadershipMembers.filter((member) => member.category === "founders").sort((a, b) => a.displayOrder - b.displayOrder);
-  const currentBoard = leadershipMembers.filter((member) => member.category === "currentBoard").sort((a, b) => a.displayOrder - b.displayOrder);
-  const previousBoard = leadershipMembers.filter((member) => member.category === "previousBoard").sort((a, b) => a.displayOrder - b.displayOrder);
-  const visibleMembers = (members: LeadershipMember[]) => members;
-
-  const renderMemberGrid = (members: LeadershipMember[]) => (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
-      {members.map((person) => {
-        const isDragged = draggedMemberId === person.id;
-        const isDropTarget = dropTargetId === person.id;
-        return (
-          <motion.article
-            key={person.id}
-            initial={{ y: 18, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            whileHover={{ y: -6, scale: 1.01, boxShadow: "0 18px 45px -25px rgba(91,63,212,0.35)" }}
-            transition={{ type: "spring", stiffness: 220, damping: 18 }}
-            draggable={isAdmin}
-            onDragStart={(event) => {
-              const dragEvent = event as unknown as { dataTransfer?: DataTransfer | null };
-              setDraggedMemberId(person.id);
-              setDropTargetId(person.id);
-              if (dragEvent.dataTransfer) {
-                dragEvent.dataTransfer.effectAllowed = "move";
-                dragEvent.dataTransfer.setData("application/ikshana-member-id", person.id);
-                dragEvent.dataTransfer.setData("text/plain", person.id);
-              }
-            }}
-            onDragEnter={(event) => { event.preventDefault(); setDropTargetId(person.id); }}
-            onDragOver={(event) => {
-              const dragEvent = event as unknown as { dataTransfer?: DataTransfer | null };
-              event.preventDefault();
-              if (dragEvent.dataTransfer) dragEvent.dataTransfer.dropEffect = "move";
-              setDropTargetId(person.id);
-            }}
-            onDrop={(event) => {
-              const dragEvent = event as unknown as { dataTransfer?: DataTransfer | null };
-              event.preventDefault();
-              event.stopPropagation();
-              const draggedId = dragEvent.dataTransfer
-                ? dragEvent.dataTransfer.getData("application/ikshana-member-id") || dragEvent.dataTransfer.getData("text/plain") || draggedMemberId
-                : draggedMemberId;
-              if (draggedId && draggedId !== person.id) handleReorderMembers(draggedId, person.id);
-              else { setDraggedMemberId(null); setDropTargetId(null); }
-            }}
-            onDragEnd={() => { setDraggedMemberId(null); setDropTargetId(null); }}
-            className={`flex h-full min-w-0 flex-col overflow-hidden rounded-[1.6rem] border border-brand-maroon/10 bg-white p-3 sm:p-5 shadow-[0_12px_35px_-18px_rgba(91,63,212,0.25)] transition-all ${isDragged ? "scale-[0.98] opacity-50" : ""} ${isDropTarget ? "border-[#5B3FD4] ring-2 ring-[#5B3FD4]/20" : ""} ${isAdmin ? "cursor-grab active:cursor-grabbing" : ""}`}
-          >
-            <div className="min-w-0">
-              {isAdmin && (
-                <div className="mb-3 flex items-center justify-end gap-2">
-                  <div className="flex items-center justify-center rounded-full border border-dashed border-[#5B3FD4]/20 bg-[#5B3FD4]/5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#5B3FD4]">
-                    <GripVertical size={12} />
-                    Drag
-                  </div>
-                  <button type="button" onClick={() => handleEditMember(person)} className="rounded-full border border-brand-maroon/10 bg-white p-2 text-brand-maroon transition hover:bg-brand-maroon hover:text-white" title="Edit">
-                    <Pencil size={14} />
-                  </button>
-                  <button type="button" onClick={() => handleDeleteMember(person.id)} className="rounded-full border border-brand-maroon/10 bg-white p-2 text-brand-maroon transition hover:bg-brand-maroon hover:text-white" title="Delete">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                <img
-                  src={person.image}
-                  alt={person.name}
-                  className="h-[80px] w-[80px] shrink-0 rounded-full border-4 border-[#5B3FD4]/10 object-cover shadow-lg sm:h-[110px] sm:w-[110px] lg:h-[135px] lg:w-[135px]"
-                />
-
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold leading-5 text-brand-maroon sm:text-[17px] sm:leading-6">
-                    {person.name.trim().split(/\s+/).map((word, index) => (
-                      <span key={`${person.id}-name-${index}`} className="inline-block whitespace-nowrap">
-                        {word}{index < person.name.trim().split(/\s+/).length - 1 ? "\u00a0" : ""}
-                      </span>
-                    ))}
-                  </h3>
-                  <p className="mt-1 break-words text-sm font-semibold leading-5 text-[#2d1620]">{person.role}</p>
-                </div>
-              </div>
-            </div>
-
-            {person.bio ? (
-              <p className="mt-5 min-w-0 max-w-full break-words text-sm leading-6 text-brand-maroon/70 [overflow-wrap:anywhere]">
-                {person.bio}
-              </p>
-            ) : null}
-
-            <div className="mt-auto flex min-w-0 items-center justify-between gap-3 pt-6">
-              <div className="flex min-w-0 items-center gap-2 text-[#5B3FD4]">
-                {person.linkedinUrl && (
-                  <a href={normalizeSocialUrl(person.linkedinUrl)} target="_blank" rel="noreferrer" className="rounded-full border border-[#5B3FD4]/15 p-2 transition hover:bg-[#5B3FD4] hover:text-white" aria-label={`Visit ${person.name}'s LinkedIn`}>
-                    <Linkedin size={16} />
-                  </a>
-                )}
-                {person.instagramUrl && (
-                  <a href={normalizeSocialUrl(person.instagramUrl)} target="_blank" rel="noreferrer" className="rounded-full border border-[#5B3FD4]/15 p-2 transition hover:bg-[#5B3FD4] hover:text-white" aria-label={`Visit ${person.name}'s Instagram`}>
-                    <Instagram size={16} />
-                  </a>
-                )}
-              </div>
-              <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.25em] text-brand-maroon/40">{person.tenure}</span>
-            </div>
-          </motion.article>
-        );
-      })}
-    </div>
-  );
+  const founders = leadershipMembers
+    .filter((member) => member.category === "founders")
+    .sort((a, b) => a.displayOrder - b.displayOrder);
+  const currentBoard = leadershipMembers
+    .filter((member) => member.category === "currentBoard")
+    .sort((a, b) => a.displayOrder - b.displayOrder);
+  const previousBoard = leadershipMembers
+    .filter((member) => member.category === "previousBoard")
+    .sort((a, b) => a.displayOrder - b.displayOrder);
+  const volunteers = leadershipMembers
+    .filter((member) => member.category === "volunteers")
+    .sort((a, b) => a.displayOrder - b.displayOrder);
 
   const normalizeTenure = (value: string) => {
     const cleaned = value.trim().replace(/[–—]/g, "-").replace(/\s+/g, " ");
     const years = cleaned.match(/(20\d{2})\s*-\s*(20\d{2})/);
-
     return years ? `${years[1]}-${years[2]}` : cleaned || "Unspecified";
   };
 
@@ -943,126 +856,372 @@ export default function FoundersTeamPage() {
     });
   };
 
-  const renderPreviousBoardByTenure = (members: LeadershipMember[]) => (
-    <div className="space-y-6">
-      {groupByTenure(members).map(([tenure, tenureMembers]) => (
-        <div key={tenure} className="space-y-4">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="h-[2px] flex-1 rounded-full bg-brand-maroon/20" />
-            <h3 className="shrink-0 whitespace-nowrap rounded-full border border-brand-maroon/15 bg-white px-4 py-2 font-sans text-xs font-bold uppercase tracking-wide text-brand-maroon shadow-sm sm:px-5 sm:py-2.5">
-              {tenure === "Unspecified" ? "BATCH" : `BATCH ${tenure}`}
-            </h3>
-            <div className="h-[2px] flex-1 rounded-full bg-brand-maroon/20" />
-          </div>
+  const previousBoardBatches = groupByTenure(previousBoard);
+  const latestPreviousBatch = previousBoardBatches[0]?.[0] ?? "";
+  const activePreviousBatch = selectedPreviousBatch && previousBoardBatches.some(([tenure]) => tenure === selectedPreviousBatch)
+    ? selectedPreviousBatch
+    : latestPreviousBatch;
+  const selectedPreviousMembers = previousBoardBatches.find(([tenure]) => tenure === activePreviousBatch)?.[1] ?? [];
 
-          {renderMemberGrid(tenureMembers)}
-        </div>
-      ))}
+  useEffect(() => {
+    const hasSelectedBatch = previousBoardBatches.some(([tenure]) => tenure === selectedPreviousBatch);
+    if (latestPreviousBatch && !hasSelectedBatch) {
+      setSelectedPreviousBatch(latestPreviousBatch);
+    }
+  }, [latestPreviousBatch, previousBoardBatches, selectedPreviousBatch]);
+
+  // Responsive card grid: `repeat(auto-fit, minmax(...))` sizes columns based on
+  // the available container width instead of jumping between fixed breakpoint
+  // column counts. This keeps cards comfortably large on every screen size, and
+  // because it's `auto-fit` (not `auto-fill`), a lone card left in the final row
+  // stretches to fill the row instead of leaving an empty gap next to it.
+  const renderMemberGrid = (members: LeadershipMember[], compact = false) => (
+    <div
+      className={`grid items-start gap-2.5 sm:gap-5 ${
+        compact
+          ? "grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))]"
+          : "grid-cols-[repeat(auto-fill,minmax(145px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(230px,1fr))]"
+      }`}
+    >
+      {members.map((person) => {
+        const isDragged = draggedMemberId === person.id;
+        const isDropTarget = dropTargetId === person.id;
+
+        return (
+          <motion.article
+            key={person.id}
+            initial={{ y: 14, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            whileHover={{
+              y: -3,
+              boxShadow: "0 18px 40px -25px rgba(91,63,212,0.28)",
+            }}
+            transition={{ type: "spring", stiffness: 220, damping: 18 }}
+            draggable={isAdmin}
+            onDragStart={(event) => {
+              const dragEvent = event as unknown as { dataTransfer?: DataTransfer | null };
+              setDraggedMemberId(person.id);
+              setDropTargetId(person.id);
+              if (dragEvent.dataTransfer) {
+                dragEvent.dataTransfer.effectAllowed = "move";
+                dragEvent.dataTransfer.setData("application/ikshana-member-id", person.id);
+                dragEvent.dataTransfer.setData("text/plain", person.id);
+              }
+            }}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setDropTargetId(person.id);
+            }}
+            onDragOver={(event) => {
+              const dragEvent = event as unknown as { dataTransfer?: DataTransfer | null };
+              event.preventDefault();
+              if (dragEvent.dataTransfer) dragEvent.dataTransfer.dropEffect = "move";
+              setDropTargetId(person.id);
+            }}
+            onDrop={(event) => {
+              const dragEvent = event as unknown as { dataTransfer?: DataTransfer | null };
+              event.preventDefault();
+              event.stopPropagation();
+
+              const draggedId = dragEvent.dataTransfer
+                ? dragEvent.dataTransfer.getData("application/ikshana-member-id") ||
+                  dragEvent.dataTransfer.getData("text/plain") ||
+                  draggedMemberId
+                : draggedMemberId;
+
+              if (draggedId && draggedId !== person.id) {
+                handleReorderMembers(draggedId, person.id);
+              } else {
+                setDraggedMemberId(null);
+                setDropTargetId(null);
+              }
+            }}
+            onDragEnd={() => {
+              setDraggedMemberId(null);
+              setDropTargetId(null);
+            }}
+            className={`group relative flex min-w-0 flex-col overflow-hidden rounded-[1.5rem] border border-brand-maroon/10 bg-white p-2.5 shadow-[0_10px_30px_-18px_rgba(91,63,212,0.24)] transition-all sm:rounded-[1.75rem] sm:p-4 ${
+              isDragged ? "scale-[0.98] opacity-50" : ""
+            } ${
+              isDropTarget ? "border-[#5B3FD4] ring-2 ring-[#5B3FD4]/20" : ""
+            } ${isAdmin ? "cursor-grab active:cursor-grabbing" : ""}`}
+          >
+            {/* Large, near-full-bleed photo: scales with the card's own width via
+                aspect-ratio, so it stays visually impactful at every screen size
+                instead of a small fixed-size avatar. */}
+            <div
+              className={`relative w-full overflow-hidden rounded-[1.35rem] bg-stone-100 ${
+                compact ? "aspect-[4/5]" : "aspect-square"
+              }`}
+            >
+              <img
+                src={person.image}
+                alt={person.name}
+                className="h-full w-full object-cover"
+              />
+
+              {isAdmin && (
+                <>
+                  <div className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full border border-dashed border-[#5B3FD4]/30 bg-white/90 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#5B3FD4] backdrop-blur">
+                    <GripVertical size={11} />
+                    Drag
+                  </div>
+
+                  <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleEditMember(person)}
+                      className="rounded-full border border-brand-maroon/10 bg-white/90 p-1.5 text-brand-maroon backdrop-blur transition hover:bg-brand-maroon hover:text-white"
+                      title="Edit"
+                    >
+                      <Pencil size={13} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMember(person.id)}
+                      className="rounded-full border border-brand-maroon/10 bg-white/90 p-1.5 text-brand-maroon backdrop-blur transition hover:bg-brand-maroon hover:text-white"
+                      title="Delete"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-1 flex-col px-0.5 pb-1 pt-3 text-left sm:px-1.5 sm:pt-4">
+              <h3 className="break-words text-lg font-bold leading-snug text-brand-maroon sm:text-xl md:text-2xl">
+                {person.name}
+              </h3>
+
+              <span
+                aria-hidden="true"
+                className="mt-2 h-[3px] w-8 shrink-0 rounded-full bg-rose-300 sm:mt-2.5 sm:w-10"
+              />
+
+              {!compact && (
+                <p className="mt-2 break-words text-base font-bold leading-5 text-[#2d1620] sm:mt-2.5 sm:text-base md:text-lg">
+                  {person.role}
+                </p>
+              )}
+
+              <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-brand-maroon/45 sm:mt-3 sm:gap-2 sm:text-xs sm:tracking-[0.18em]">
+                <CalendarDays size={13} className="shrink-0 text-brand-maroon/40 sm:h-[14px] sm:w-[14px]" aria-hidden="true" />
+                <span className="h-3 w-px shrink-0 bg-brand-maroon/15" aria-hidden="true" />
+                <span>{person.tenure}</span>
+              </div>
+
+              {!compact && person.bio ? (
+                <p className="mt-4 border-t border-brand-maroon/10 pt-3 text-sm leading-6 text-brand-maroon/70 [overflow-wrap:anywhere]">
+                  {person.bio}
+                </p>
+              ) : null}
+
+              {!compact && (person.linkedinUrl || person.instagramUrl) && (
+                <div className="mt-3 flex items-center gap-1.5">
+                  {person.linkedinUrl && (
+                    <a
+                      href={normalizeSocialUrl(person.linkedinUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-brand-maroon/10 p-1.5 text-brand-maroon transition hover:bg-brand-maroon hover:text-white"
+                      aria-label={`Visit ${person.name}'s LinkedIn`}
+                    >
+                      <Linkedin size={14} />
+                    </a>
+                  )}
+
+                  {person.instagramUrl && (
+                    <a
+                      href={normalizeSocialUrl(person.instagramUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-brand-maroon/10 p-1.5 text-brand-maroon transition hover:bg-brand-maroon hover:text-white"
+                      aria-label={`Visit ${person.name}'s Instagram`}
+                    >
+                      <Instagram size={14} />
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.article>
+        );
+      })}
     </div>
   );
 
-  const toggleViewMore = (category: LeadershipCategory) => {
-    setViewMoreByCategory((prev) => ({ ...prev, [category]: !prev[category] }));
+
+  const sectionData: Record<LeadershipCategory, { title: string; subtitle: string; members: LeadershipMember[]; emptyText: string }> = {
+    founders: {
+      title: "Founders",
+      subtitle: "The visionaries who started this journey",
+      members: founders,
+      emptyText: "founders",
+    },
+    currentBoard: {
+      title: "Executive Board",
+      subtitle: "The leaders guiding our work today",
+      members: currentBoard,
+      emptyText: "executive board members",
+    },
+    previousBoard: {
+      title: "Previous Board",
+      subtitle: "Former leaders who helped shape our journey",
+      members: selectedPreviousMembers,
+      emptyText: "previous board members",
+    },
+    volunteers: {
+      title: "Volunteers",
+      subtitle: "The people who give their time and energy to Ikshana",
+      members: volunteers,
+      emptyText: "volunteers",
+    },
   };
 
-  return (
-    <section
-      className={`min-h-screen bg-[#fffcfc] px-4 pb-24 ${
-        isAdmin ? "pt-20" : "pt-10"
-      } sm:px-6 lg:px-8 xl:px-10 2xl:px-12`}
-    >
-      <div className="mx-auto flex max-w-7xl flex-col gap-8">
-        <div className="mt-10 flex items-center justify-between gap-4 sm:mt-12">
-          <div />
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditingMemberId(null);
-                setUploadedFile(null);
-                revokeObjectUrl(previewImage);
-                revokeObjectUrl(cropSourceImage);
-                setPreviewImage(null);
-                setCropSourceImage(null);
-                setCropImage(null);
-                setIsPreparingCropSource(false);
-                setShowCropper(false);
-                setNewMember({ name: "", role: "", tenure: "", bio: "", linkedinUrl: "", instagramUrl: "", category: "founders" });
-                setShowAddMemberForm(true);
-              }}
-              className="inline-flex items-center gap-2 rounded-full bg-brand-maroon px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900"
-            >
-              <Plus size={16} />
-              Add Member
-            </button>
-          )}
-        </div>
+  const activeData = sectionData[activeSection];
 
+  return (
+    <section className="min-h-screen bg-[#fffcfc] px-3 pb-24 pt-24 sm:px-6 sm:pt-28 lg:px-8 lg:pt-28 xl:px-10 2xl:px-12">
+      <div className="mx-auto flex max-w-7xl flex-col gap-8">
         <motion.div
           initial={{ y: 24, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.6 }}
-          className="rounded-[1.75rem] border border-brand-maroon/10 bg-white p-6 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.28)] sm:p-8 lg:p-10"
+          className="rounded-[1.75rem] border border-brand-maroon/10 bg-white p-3 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.22)] sm:p-6 lg:p-8 xl:p-10"
         >
-          <div className="mx-auto max-w-4xl text-center">
-            <h1 className="mt-3 text-4xl font-semibold tracking-tight text-brand-maroon sm:text-5xl">
-              Our Founders & Team
+          <div className="mx-auto max-w-5xl text-center">
+            <h1 className="font-serif text-[1.75rem] font-medium leading-tight tracking-[-0.03em] text-brand-maroon sm:text-4xl md:text-5xl lg:text-[3.5rem]">
+              Our{" "}
+              <span className="relative inline-block">
+                Founders
+                <span
+                  aria-hidden="true"
+                  className="absolute -bottom-[0.08em] left-0 h-[0.06em] w-full rounded-full bg-brand-maroon/20"
+                />
+              </span>{" "}
+              &amp; Team
             </h1>
           </div>
 
-          <div className="mt-10 space-y-8">
-            {[
-              { key: "founders", title: "Founders", subtitle: "The visionaries who started this journey", members: founders, emptyText: "founders" },
-              { key: "currentBoard", title: "Executive Board", subtitle: "The leaders guiding our work today", members: currentBoard, emptyText: "executive board members" },
-              { key: "previousBoard", title: "Previous Board", subtitle: "Former leaders who helped shape our journey", members: previousBoard, emptyText: "previous board members" },
-            ].map((section) => {
-              const showAll = viewMoreByCategory[section.key as LeadershipCategory];
+          <div className="mx-auto mt-7 w-full max-w-4xl">
+            <div className="grid w-full grid-cols-4 gap-1.5 rounded-2xl border border-brand-maroon/10 bg-[#fffafa] p-1.5 sm:gap-2 sm:p-2">
+              {(
+                [
+                  { key: "founders", label: "Founders" },
+                  { key: "currentBoard", label: "Executive Board" },
+                  { key: "previousBoard", label: "Previous Board" },
+                  { key: "volunteers", label: "Volunteers" },
+                ] as const
+              ).map((tab) => {
+                const active = activeSection === tab.key;
 
-              const previousBoardBatches =
-                section.key === "previousBoard" ? groupByTenure(section.members) : [];
-              const latestPreviousBoardBatch = previousBoardBatches[0]?.[1] ?? [];
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setActiveSection(tab.key)}
+                    className={`flex min-h-12 w-full items-center justify-center rounded-xl px-1.5 py-2.5 text-[9px] font-semibold leading-tight tracking-wide transition-all min-[380px]:text-[10px] sm:min-h-[3.25rem] sm:px-3 sm:text-sm ${
+                      active
+                        ? "bg-brand-maroon text-white shadow-md"
+                        : "text-brand-maroon/70 hover:bg-white hover:text-brand-maroon"
+                    }`}
+                  >
+                    <span className="text-center">{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-              const visible = showAll
-                ? section.members
-                : section.key === "previousBoard"
-                  ? latestPreviousBoardBatch
-                  : section.members.slice(0, 4);
+            <div className="mt-4 flex justify-center px-2">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeSection}
+                  initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="inline-flex max-w-full items-center gap-2.5 rounded-full border border-brand-maroon/10 bg-[#fff8f5] px-5 py-2.5 shadow-[0_14px_34px_-24px_rgba(139,29,59,0.45)] sm:gap-3 sm:px-6 sm:py-3"
+                >
+                  <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-brand-maroon/35" />
+                  <p className="text-center text-xs font-medium leading-5 tracking-wide text-brand-maroon/75 sm:text-sm">
+                    {sectionData[activeSection].subtitle}
+                  </p>
+                  <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-brand-maroon/35" />
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
 
-              return (
-                <section key={section.key} className="rounded-[1.5rem] border border-brand-maroon/10 bg-gradient-to-br from-[#fdfcff] via-white to-[#f6f2ff] p-4 shadow-[0_20px_60px_-30px_rgba(91,63,212,0.2)] sm:p-5">
-                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-2xl font-semibold text-brand-maroon">{section.title}</h2>
-                      <p className="text-sm text-brand-maroon/60">{section.subtitle}</p>
-                    </div>
-                    {section.members.length > 4 && (
+          <div className="mt-8 rounded-[1.5rem] border border-brand-maroon/10 bg-gradient-to-br from-[#fdfcff] via-white to-[#fff8f5] p-3 sm:p-5 lg:p-6">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMemberId(null);
+                    setUploadedFile(null);
+                    revokeObjectUrl(previewImage);
+                    revokeObjectUrl(cropSourceImage);
+                    setPreviewImage(null);
+                    setCropSourceImage(null);
+                    setCropImage(null);
+                    setIsPreparingCropSource(false);
+                    setShowCropper(false);
+                    setNewMember({
+                      name: "",
+                      role: "",
+                      tenure: activeSection === "previousBoard" ? activePreviousBatch : "",
+                      bio: "",
+                      linkedinUrl: "",
+                      instagramUrl: "",
+                      category: activeSection,
+                    });
+                    setShowAddMemberForm(true);
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-brand-maroon px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900 sm:w-auto"
+                >
+                  <Plus size={16} />
+                  Add Member
+                </button>
+              )}
+            </div>
+
+            {activeSection === "previousBoard" && previousBoard.length > 0 && (
+              <div className="mb-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  {previousBoardBatches.map(([tenure]) => {
+                    const active = tenure === activePreviousBatch;
+
+                    return (
                       <button
+                        key={tenure}
                         type="button"
-                        onClick={() => toggleViewMore(section.key as LeadershipCategory)}
-                        className="ml-auto inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#5B3FD4]/20 bg-[#5B3FD4]/5 px-4 py-2 text-sm font-semibold text-[#5B3FD4] transition hover:bg-[#5B3FD4] hover:text-white"
+                        onClick={() => setSelectedPreviousBatch(tenure)}
+                        className={`inline-flex min-h-9 items-center justify-center rounded-full border px-3.5 py-2 text-xs font-semibold transition-all sm:text-sm ${
+                          active
+                            ? "border-brand-maroon bg-brand-maroon text-white shadow-sm"
+                            : "border-brand-maroon/15 bg-white text-brand-maroon/70 hover:border-brand-maroon/25 hover:text-brand-maroon"
+                        }`}
                       >
-                        {showAll
-                          ? "Show Less"
-                          : section.key === "previousBoard"
-                            ? "View All Batches"
-                            : "View More"}
-                        {showAll ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        {tenure === "Unspecified" ? "Batch" : tenure}
                       </button>
-                    )}
-                  </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-                  {section.members.length === 0 ? (
-                    <div className="rounded-[1rem] border border-dashed border-brand-maroon/20 bg-white/70 p-4 text-sm text-brand-maroon/70">
-                      No {section.emptyText} added yet.
-                    </div>
-                  ) : (
-                    section.key === "previousBoard"
-                      ? renderPreviousBoardByTenure(visible)
-                      : renderMemberGrid(visible)
-                  )}
-                </section>
-              );
-            })}
+            {activeData.members.length === 0 ? (
+              <div className="rounded-[1rem] border border-dashed border-brand-maroon/20 bg-white/70 p-6 text-center text-sm text-brand-maroon/70">
+                No {activeData.emptyText} added yet.
+              </div>
+            ) : activeSection === "volunteers" ? (
+              renderMemberGrid(activeData.members, true)
+            ) : (
+              renderMemberGrid(activeData.members)
+            )}
           </div>
         </motion.div>
       </div>
@@ -1079,7 +1238,7 @@ export default function FoundersTeamPage() {
             <div className="sticky top-0 z-10 mb-6 flex items-center justify-between gap-4 rounded-2xl border border-brand-maroon/10 bg-white/90 px-2 py-2 backdrop-blur">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon/40">Admin</p>
-                <h3 className="text-2xl font-serif text-brand-maroon">{editingMemberId ? "Update leadership member" : "Add leadership member"}</h3>
+                <h3 className="text-2xl font-serif text-brand-maroon">{editingMemberId ? "Update member" : "Add member"}</h3>
               </div>
               <button
                 type="button"
@@ -1099,10 +1258,16 @@ export default function FoundersTeamPage() {
               >
                 <option value="founders">Founders</option>
                 <option value="currentBoard">Current Executive Board</option>
-                <option value="previousBoard">Previous Boards</option>
+                <option value="previousBoard">Previous Board</option>
+                <option value="volunteers">Volunteers</option>
               </select>
               <input value={newMember.name} onChange={(event) => setNewMember({ ...newMember, name: event.target.value })} placeholder="Name" className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3" required />
-              <input value={newMember.role} onChange={(event) => setNewMember({ ...newMember, role: event.target.value })} placeholder="Role" className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3" required />
+              <input value={newMember.role} onChange={(event) => setNewMember({ ...newMember, role: event.target.value })} placeholder={newMember.category === "volunteers" ? "Role (internal only)" : "Role"} className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3" required />
+              {newMember.category === "volunteers" && (
+                <p className="-mt-2 text-xs leading-5 text-brand-maroon/55">
+                  The role is stored for admin use but is not shown on the Volunteers section.
+                </p>
+              )}
               <input value={newMember.tenure} onChange={(event) => setNewMember({ ...newMember, tenure: event.target.value })} placeholder="Tenure year" className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3" />
               <input value={newMember.linkedinUrl} onChange={(event) => setNewMember({ ...newMember, linkedinUrl: event.target.value })} placeholder="LinkedIn URL (optional)" className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3" />
               <input value={newMember.instagramUrl} onChange={(event) => setNewMember({ ...newMember, instagramUrl: event.target.value })} placeholder="Instagram URL (optional)" className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3" />
