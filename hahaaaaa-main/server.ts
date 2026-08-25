@@ -714,56 +714,68 @@ async function startServer() {
   // Photos API
   app.get("/api/photos", async (req, res) => {
     const { category, sub_category } = req.query;
-    // Debug: log incoming query params for troubleshooting
+
     try {
       console.log("[DEBUG] GET /api/photos query:", { category, sub_category });
 
       let query = supabase.from("photos").select("*");
+
       if (category) query = query.eq("category", category);
       if (sub_category) query = query.eq("sub_category", sub_category);
 
-      // Try ordering by created_at; if that fails, fallback to unordered fetch
-      try {
-        const { data, error } = await query.order("created_at", { ascending: false });
-        if (error) throw error;
-        return res.json(data);
-      } catch (errInner) {
-        console.error("[DEBUG] Ordering by created_at failed, retrying without order:", errInner);
-        const { data: fallbackData, error: fallbackError } = await supabase.from("photos").select("*");
-        if (fallbackError) throw fallbackError;
-        return res.json(fallbackData);
-      }
+      // Gallery order is persisted in display_order. group_id/photo_order are
+      // secondary sorts so photos within the same memory stay adjacent and in
+      // their saved order even before the frontend re-groups them.
+      const { data, error } = await query
+        .order("display_order", { ascending: true, nullsFirst: false })
+        .order("group_id", { ascending: true, nullsFirst: false })
+        .order("photo_order", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      console.log(`[DEBUG] GET /api/photos returned ${data?.length || 0} record(s)`);
+      return res.json(data || []);
     } catch (error: any) {
-      console.error("Supabase fetch photos error:", error && error.stack ? error.stack : error);
-      // If Supabase is unreachable, attempt to return local uploads manifest as fallback
+      console.error(
+        "Supabase fetch photos error:",
+        error?.stack || error?.message || error
+      );
+
+      // Keep the local manifest as a development fallback only. Do not use it
+      // to report a successful database write.
       try {
         const uploadsDir = path.join(__dirname, "uploads");
         const manifestPath = path.join(uploadsDir, "manifest.json");
         let manifest: any[] = [];
+
         try {
           const raw = await fs.promises.readFile(manifestPath, "utf8");
           manifest = JSON.parse(raw || "[]");
-        } catch (e) {
-          // If no manifest, build from files in uploads/
-          try {
-            const files = await fs.promises.readdir(uploadsDir);
-            manifest = files
-              .filter((f) => f.startsWith("img-"))
-              .map((f) => ({ url: `/uploads/${f}`, title: null, category: null, sub_category: null, date: null, is_featured: 0, created_at: null }));
-          } catch (ee) {
-            manifest = [];
-          }
+        } catch {
+          manifest = [];
         }
 
-        // Apply category/sub_category filters if provided
         let results = manifest;
-        if (category) results = results.filter((r) => String(r.category) === String(category));
-        if (sub_category) results = results.filter((r) => String(r.sub_category) === String(sub_category));
+
+        if (category) {
+          results = results.filter(
+            (record) => String(record.category) === String(category)
+          );
+        }
+
+        if (sub_category) {
+          results = results.filter(
+            (record) => String(record.sub_category) === String(sub_category)
+          );
+        }
 
         return res.json(results);
-      } catch (fallbackErr) {
-        const errMsg = error?.message || String(error || "Unknown error");
-        return res.status(500).json({ error: "Failed to fetch photos", detail: errMsg });
+      } catch (fallbackError) {
+        return res.status(500).json({
+          error: "Failed to fetch photos",
+          detail: error?.message || String(error || fallbackError),
+        });
       }
     }
   });
@@ -771,11 +783,20 @@ async function startServer() {
   // Debug endpoint: check photos table accessibility and surface Supabase errors
   app.get("/api/debug/photos-check", async (req, res) => {
     try {
-      const { data, error } = await supabase.from("photos").select("id,created_at").limit(1);
+      const { data, error } = await supabase
+        .from("photos")
+        .select("id,created_at,display_order,group_id,photo_order")
+        .limit(1);
+
       if (error) {
         console.error("[DEBUG] photos-check error:", error);
-        return res.status(500).json({ ok: false, error: error.message || String(error), details: error });
+        return res.status(500).json({
+          ok: false,
+          error: error.message || String(error),
+          details: error,
+        });
       }
+
       return res.json({ ok: true, sample: data });
     } catch (err: any) {
       console.error("[DEBUG] photos-check exception:", err);
@@ -783,193 +804,459 @@ async function startServer() {
     }
   });
 
-  app.post("/api/photos", authenticateOptionalToken, upload.single("file"), async (req: any, res) => {
-    // Debug logging to help diagnose upload issues (remove in production)
-    try {
-      console.log("[DEBUG] POST /api/photos headers:", { host: req.headers.host, contentType: req.headers['content-type'] });
-      console.log("[DEBUG] POST /api/photos body keys:", Object.keys(req.body || {}));
-      console.log("[DEBUG] POST /api/photos file present:", !!req.file, req.file ? { originalname: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype } : null);
-    } catch (e) {
-      console.error("[DEBUG] Failed to log upload debug info:", e);
-    }
+  app.post(
+    "/api/photos",
+    authenticateOptionalToken,
+    upload.single("file"),
+    async (req: any, res) => {
+      try {
+        console.log("[DEBUG] POST /api/photos headers:", {
+          host: req.headers.host,
+          contentType: req.headers["content-type"],
+        });
+        console.log(
+          "[DEBUG] POST /api/photos body:",
+          req.body
+            ? {
+                title: req.body.title,
+                category: req.body.category,
+                sub_category: req.body.sub_category,
+                date: req.body.date,
+                group_id: req.body.group_id,
+                photo_order: req.body.photo_order,
+                display_order: req.body.display_order,
+              }
+            : {}
+        );
+        console.log("[DEBUG] POST /api/photos file present:", !!req.file, req.file
+          ? {
+              originalname: req.file.originalname,
+              size: req.file.size,
+              mimetype: req.file.mimetype,
+            }
+          : null);
 
-    const email = String(req.user?.email || "").trim().toLowerCase();
-    const isAuthorized = req.user?.role === "admin" || email === "24r01a66v9@cmrithyderabad.edu.in" || email === "admin@ikshana.local" || process.env.NODE_ENV !== "production";
+        const email = String(req.user?.email || "").trim().toLowerCase();
+        const isAuthorized =
+          req.user?.role === "admin" ||
+          email === "24r01a66v9@cmrithyderabad.edu.in" ||
+          email === "admin@ikshana.local" ||
+          process.env.NODE_ENV !== "production";
 
-    if (!isAuthorized) {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-
-    const { title, category, sub_category, date, is_featured } = req.body;
-    
-    if (!req.file) {
-      return res.status(400).json({ error: "File is required" });
-    }
-    if (!category) {
-      return res.status(400).json({ error: "Category is required" });
-    }
-
-    let fileUrl: string | null = null;
-    try {
-      // Upload file to Supabase storage bucket named 'photos' (may fallback to local file)
-      fileUrl = await uploadToSupabaseStorage(req.file, "photos");
-
-      // Normalize is_featured coming from form-data (handles "true"/"false", "1"/"0", booleans)
-      const featuredFlag = (is_featured === "true" || is_featured === "1" || is_featured === 1 || is_featured === true) ? 1 : 0;
-
-      // Insert metadata to 'photos' table
-      const { data, error } = await supabase.from("photos").insert([{
-        url: fileUrl,
-        title: title || null,
-        category,
-        sub_category: sub_category || null,
-        date: date || new Date().toLocaleDateString(),
-        is_featured: featuredFlag
-      }]).select();
-      
-      if (error) throw error;
-      res.json({ success: true, id: data[0].id, url: fileUrl });
-    } catch (error: any) {
-      console.error("Supabase add photo error:", error);
-
-      // If Supabase is unreachable (common in local dev when env is not set),
-      // return success with the local fallback URL so uploads still work.
-      const errText = String(error?.message || error || "").toLowerCase();
-      if (fileUrl && (errText.includes("getaddrinfo") || errText.includes("enotfound") || errText.includes("fetch failed"))) {
-        console.warn("Supabase unreachable — saving local fallback metadata and returning local URL for uploaded photo.");
-        // Try to persist metadata locally so GET /api/photos can return it when Supabase is down
-        try {
-          const localRecord = {
-            url: fileUrl,
-            title: title || null,
-            category: category || null,
-            sub_category: sub_category || null,
-            date: date || new Date().toLocaleDateString(),
-            is_featured: featuredFlag ? 1 : 0,
-          };
-          await appendLocalPhotoManifest(localRecord);
-        } catch (e) {
-          console.error("Failed to write local manifest for photo:", e);
+        if (!isAuthorized) {
+          return res.status(403).json({ error: "Admin access required" });
         }
-        return res.json({ success: true, id: null, url: fileUrl, fallback: true });
-      }
 
-      res.status(500).json({ error: error.message || "Failed to add photo" });
+        const {
+          title,
+          category,
+          sub_category,
+          date,
+          is_featured,
+          display_order,
+          group_id,
+          photo_order,
+        } = req.body || {};
+
+        if (!req.file) {
+          return res.status(400).json({ error: "File is required" });
+        }
+
+        if (!category) {
+          return res.status(400).json({ error: "Category is required" });
+        }
+
+        // Upload the actual image first. If Supabase Storage is unavailable,
+        // uploadToSupabaseStorage() may return a local fallback URL, but the
+        // metadata must still be inserted into the database successfully.
+        const fileUrl = await uploadToSupabaseStorage(req.file, "photos");
+
+        const featuredFlag =
+          is_featured === "true" ||
+          is_featured === "1" ||
+          is_featured === 1 ||
+          is_featured === true
+            ? 1
+            : 0;
+
+        // If the frontend did not provide an order, append the new memory to
+        // the end of its category.
+        let nextDisplayOrder = Number(display_order);
+
+        if (!Number.isFinite(nextDisplayOrder)) {
+          nextDisplayOrder = 1;
+
+          const { data: lastPhoto, error: orderError } = await supabase
+            .from("photos")
+            .select("display_order")
+            .eq("category", category)
+            .order("display_order", { ascending: false, nullsFirst: false })
+            .limit(1);
+
+          if (!orderError && lastPhoto?.[0]?.display_order != null) {
+            nextDisplayOrder = Number(lastPhoto[0].display_order) + 1;
+          } else if (orderError) {
+            // Keep the insert working if an older database does not have
+            // display_order yet. The reorder endpoint will report the schema
+            // problem explicitly instead of silently pretending it worked.
+            console.warn(
+              "[DEBUG] Could not determine next display_order:",
+              orderError.message || orderError
+            );
+          }
+        }
+
+        const numericPhotoOrder = Number(photo_order);
+
+        const insertPayload: Record<string, any> = {
+          url: fileUrl,
+          title: title?.trim() || "Untitled Moment",
+          category,
+          sub_category: sub_category || null,
+          date: date || new Date().toISOString().slice(0, 10),
+          is_featured: featuredFlag,
+          display_order: nextDisplayOrder,
+          // group_id ties every photo in a multi-photo memory together, and
+          // photo_order keeps them in the order the admin arranged them in.
+          // Without these two fields the frontend cannot tell a 5-photo
+          // memory apart from 5 separate single-photo memories.
+          group_id: group_id || null,
+          photo_order: Number.isFinite(numericPhotoOrder) ? numericPhotoOrder : 0,
+        };
+
+        console.log("[DEBUG] Inserting photo metadata:", insertPayload);
+
+        const { data, error } = await supabase
+          .from("photos")
+          .insert([insertPayload])
+          .select("*")
+          .single();
+
+        if (error) {
+          console.error("[DEBUG] Photo database insert failed:", error);
+
+          // group_id/photo_order columns may not exist yet on an older
+          // database. Surface that clearly instead of a generic 500 so it's
+          // obvious a migration is needed, rather than looking like a
+          // one-off upload failure.
+          const missingColumn =
+            error?.message?.includes("group_id") || error?.message?.includes("photo_order");
+          if (missingColumn) {
+            return res.status(500).json({
+              error:
+                "The photos table is missing the group_id/photo_order columns. Add them (text/uuid and integer) before multi-photo memories will work.",
+            });
+          }
+
+          throw error;
+        }
+
+        console.log("[DEBUG] Photo inserted successfully:", data);
+
+        return res.status(201).json({
+          success: true,
+          photo: data,
+          id: data.id,
+          url: data.url,
+        });
+      } catch (error: any) {
+        console.error(
+          "Supabase add photo error:",
+          error?.stack || error?.message || error
+        );
+
+        // IMPORTANT: Do not return success when the database insert fails.
+        // The frontend must know that the memory was not persisted.
+        return res.status(500).json({
+          error: error?.message || "Failed to add photo",
+        });
+      }
     }
-  });
+  );
 
   app.delete("/api/photos/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
+
     const { id } = req.params;
-    
+
     try {
-      // Fetch photo to get the URL
       const { data: photoData, error: fetchError } = await supabase
         .from("photos")
         .select("url")
         .eq("id", id)
         .single();
-      
+
       if (fetchError) throw fetchError;
-      
-      // Delete file from storage
-      if (photoData && photoData.url) {
+
+      if (photoData?.url) {
         await deleteFromSupabaseStorage(photoData.url, "photos");
       }
-      
-      // Delete photo from database
-      const { error } = await supabase.from("photos").delete().eq("id", id);
+
+      const { error } = await supabase
+        .from("photos")
+        .delete()
+        .eq("id", id);
+
       if (error) throw error;
-      
+
+      console.log(`[DEBUG] Photo ${id} deleted successfully`);
       return res.json({ success: true });
-    } catch (error) {
-      console.error("Supabase delete photo error:", error);
-      res.status(500).json({ error: "Failed to delete photo from storage or database" });
-    }
-  });
-
-  app.patch("/api/photos/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-    const { id } = req.params;
-    const { title, category, sub_category, date } = req.body || {};
-
-    try {
-      const updatePayload: Record<string, any> = {};
-      if (title !== undefined) updatePayload.title = title;
-      if (category !== undefined) updatePayload.category = category;
-      if (sub_category !== undefined) updatePayload.sub_category = sub_category;
-      if (date !== undefined) updatePayload.date = date;
-
-      const { data, error } = await supabase.from("photos").update(updatePayload).eq("id", id).select();
-      if (error) throw error;
-      return res.json({ success: true, photo: data?.[0] });
     } catch (error: any) {
-      console.error("Supabase update photo error:", error);
-      return res.status(500).json({ error: error.message || "Failed to update photo" });
+      console.error(
+        "Supabase delete photo error:",
+        error?.stack || error?.message || error
+      );
+      return res.status(500).json({
+        error: error?.message || "Failed to delete photo from storage or database",
+      });
     }
   });
+
+  // PATCH accepts multipart/form-data because the gallery edit form can send
+  // both text fields and an optional replacement image.
+  app.patch(
+    "/api/photos/:id",
+    authenticateOptionalToken,
+    upload.single("file"),
+    async (req: any, res) => {
+      const email = String(req.user?.email || "").trim().toLowerCase();
+      const isAuthorized =
+        req.user?.role === "admin" ||
+        email === "24r01a66v9@cmrithyderabad.edu.in" ||
+        email === "admin@ikshana.local" ||
+        process.env.NODE_ENV !== "production";
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { id } = req.params;
+
+      try {
+        console.log("[DEBUG] PATCH /api/photos/:id", {
+          id,
+          body: req.body,
+          file: req.file
+            ? {
+                originalname: req.file.originalname,
+                size: req.file.size,
+                mimetype: req.file.mimetype,
+              }
+            : null,
+        });
+
+        const {
+          title,
+          category,
+          sub_category,
+          date,
+          display_order,
+          group_id,
+          photo_order,
+        } = req.body || {};
+
+        // Read the current record so we can preserve fields that were not
+        // changed and remove the previous image when it is replaced.
+        const { data: existingPhoto, error: existingError } = await supabase
+          .from("photos")
+          .select("*")
+          .eq("id", id)
+          .single();
+
+        if (existingError) throw existingError;
+
+        const updatePayload: Record<string, any> = {};
+
+        if (title !== undefined) updatePayload.title = title.trim();
+        if (category !== undefined) updatePayload.category = category;
+        if (sub_category !== undefined) {
+          updatePayload.sub_category = sub_category || null;
+        }
+        if (date !== undefined) updatePayload.date = date;
+        if (group_id !== undefined) updatePayload.group_id = group_id || null;
+        if (photo_order !== undefined) {
+          const numericPhotoOrder = Number(photo_order);
+          if (Number.isFinite(numericPhotoOrder)) {
+            updatePayload.photo_order = numericPhotoOrder;
+          }
+        }
+        if (display_order !== undefined && display_order !== "") {
+          const numericOrder = Number(display_order);
+
+          if (!Number.isFinite(numericOrder)) {
+            return res.status(400).json({
+              error: "display_order must be a valid number",
+            });
+          }
+
+          updatePayload.display_order = numericOrder;
+        }
+
+        // A new image is optional during edit. If supplied, upload it and
+        // replace the existing URL.
+        if (req.file) {
+          const newFileUrl = await uploadToSupabaseStorage(req.file, "photos");
+          updatePayload.url = newFileUrl;
+
+          if (
+            existingPhoto?.url &&
+            existingPhoto.url !== newFileUrl &&
+            String(existingPhoto.url).includes(
+              "/storage/v1/object/public/"
+            )
+          ) {
+            await deleteFromSupabaseStorage(existingPhoto.url, "photos");
+          }
+        }
+
+        if (Object.keys(updatePayload).length === 0) {
+          return res.status(400).json({
+            error: "No fields were provided to update",
+          });
+        }
+
+        console.log("[DEBUG] Updating photo:", {
+          id,
+          updatePayload,
+        });
+
+        const { data, error } = await supabase
+          .from("photos")
+          .update(updatePayload)
+          .eq("id", id)
+          .select("*")
+          .single();
+
+        if (error) {
+          const missingColumn =
+            error?.message?.includes("group_id") || error?.message?.includes("photo_order");
+          if (missingColumn) {
+            return res.status(500).json({
+              error:
+                "The photos table is missing the group_id/photo_order columns. Add them (text/uuid and integer) before multi-photo memories will work.",
+            });
+          }
+          throw error;
+        }
+
+        console.log("[DEBUG] Photo updated successfully:", data);
+
+        return res.json({
+          success: true,
+          photo: data,
+        });
+      } catch (error: any) {
+        console.error(
+          "Supabase update photo error:",
+          error?.stack || error?.message || error
+        );
+
+        return res.status(500).json({
+          error: error?.message || "Failed to update photo",
+        });
+      }
+    }
+  );
 
   app.patch("/api/photos/:id/feature", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
+
     const { id } = req.params;
     const { category } = req.body;
 
     try {
-      // Reset all featured in this category
       const { error: resetError } = await supabase
         .from("photos")
         .update({ is_featured: 0 })
         .eq("category", category);
+
       if (resetError) throw resetError;
 
-      // Set the selected photo to featured
       const { data, error } = await supabase
         .from("photos")
         .update({ is_featured: 1 })
         .eq("id", id)
         .select();
+
       if (error) throw error;
 
-      return res.json({ success: true });
-    } catch (error) {
+      return res.json({ success: true, photo: data?.[0] });
+    } catch (error: any) {
       console.error("Supabase feature photo error:", error);
-      return res.status(500).json({ error: "Failed to feature photo" });
+      return res.status(500).json({
+        error: error?.message || "Failed to feature photo",
+      });
     }
   });
 
   // Reorder photos in gallery
   app.post("/api/photos/reorder", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
 
-    const { order } = req.body;
-    if (!order || typeof order !== 'object') {
+    const { order } = req.body || {};
+
+    if (!order || typeof order !== "object" || Array.isArray(order)) {
       return res.status(400).json({ error: "Order mapping is required" });
     }
 
     try {
-      // Update display_order for each photo
-      const updates = Object.entries(order).map(([photoId, position]: [string, any]) =>
-        supabase.from("photos").update({ display_order: position }).eq("id", photoId)
+      const entries = Object.entries(order);
+
+      if (entries.length === 0) {
+        return res.json({ success: true });
+      }
+
+      // Every Supabase update must be checked. Promise.all() by itself does
+      // not throw for Supabase's { data, error } responses, which previously
+      // allowed this endpoint to return 200 even when nothing was saved.
+      const results = await Promise.all(
+        entries.map(async ([photoId, position]) => {
+          const numericPosition = Number(position);
+
+          if (!Number.isFinite(numericPosition)) {
+            throw new Error(
+              `Invalid display_order for photo ${photoId}: ${position}`
+            );
+          }
+
+          const { data, error } = await supabase
+            .from("photos")
+            .update({ display_order: numericPosition })
+            .eq("id", photoId)
+            .select("id,display_order")
+            .maybeSingle();
+
+          if (error) throw error;
+
+          if (!data) {
+            throw new Error(`Photo ${photoId} was not found`);
+          }
+
+          return data;
+        })
       );
 
-      await Promise.all(updates);
-      return res.json({ success: true });
+      console.log("[DEBUG] Gallery order persisted:", results);
+
+      return res.json({
+        success: true,
+        updated: results,
+      });
     } catch (error: any) {
-      console.error("Supabase reorder photos error:", error);
-      // If display_order column doesn't exist, still return success but log warning
-      if (error?.message?.includes("column")) {
-        console.warn("display_order column not found - order changes saved client-side only");
-        return res.json({ success: true, warning: "Order saved locally" });
-      }
-      return res.status(500).json({ error: error.message || "Failed to reorder photos" });
+      console.error(
+        "Supabase reorder photos error:",
+        error?.stack || error?.message || error
+      );
+
+      return res.status(500).json({
+        error: error?.message || "Failed to reorder photos",
+      });
     }
   });
 

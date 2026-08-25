@@ -1,6 +1,23 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ImageIcon, Plus, X, Upload, Trash2, Camera, Star, Eye, EyeOff, Users, HandHeart, Sparkles, CalendarDays } from "lucide-react";
+import {
+  ImageIcon,
+  Plus,
+  X,
+  Upload,
+  Trash2,
+  Camera,
+  Star,
+  Eye,
+  EyeOff,
+  Users,
+  HandHeart,
+  Sparkles,
+  CalendarDays,
+  Sprout,
+  BookOpen,
+  Megaphone,
+} from "lucide-react";
 import { buildAuthRequestInit } from "../auth/fetchWithAuth";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -11,6 +28,68 @@ interface AboutPhoto {
   caption: string;
   is_featured: boolean;
 }
+
+// The Ikshana story, year by year. This is real narrative content (not a
+// generic "01 / 02 / 03" list) — edit the copy here as milestones change or
+// new years are added. `dot` is a hex color so the timeline can visibly
+// deepen from a young, light rose in 2021 to the full brand maroon today,
+// standing in for the foundation's growth without relying on stock icons.
+const journeyMilestones: {
+  year: string;
+  title: string;
+  description: string;
+  icon: typeof Sprout;
+  dot: string;
+}[] = [
+  {
+    year: "2021",
+    title: "Where it began",
+    description:
+      "A small group of volunteers came together around one idea: service should be community-led, not charity delivered from a distance.",
+    icon: Sprout,
+    dot: "#f2b9c4",
+  },
+  {
+    year: "2022",
+    title: "First visits, first bonds",
+    description:
+      "Regular visits to orphanages and old-age homes began, turning one-off drives into relationships that lasted well beyond a single afternoon.",
+    icon: HandHeart,
+    dot: "#e28fa0",
+  },
+  {
+    year: "2023",
+    title: "Beyond the visit",
+    description:
+      "Ikshana started offering direct support for medical treatment and school fees for the families it had come to know.",
+    icon: BookOpen,
+    dot: "#c96a80",
+  },
+  {
+    year: "2024",
+    title: "Raising our voice",
+    description:
+      "Awareness programs on health, education and elder care brought the wider community into the work, not just the volunteers doing it.",
+    icon: Megaphone,
+    dot: "#a94860",
+  },
+  {
+    year: "2025",
+    title: "Growing hands",
+    description:
+      "Volunteer numbers crossed 100, and donation drives became a steady rhythm across the calendar rather than occasional events.",
+    icon: Users,
+    dot: "#8a2f47",
+  },
+  {
+    year: "2026",
+    title: "Today",
+    description:
+      "Ikshana continues as a volunteer-run foundation — still community-led, still shaped by the people it serves.",
+    icon: Sparkles,
+    dot: "#7a1f2d",
+  },
+];
 
 export default function About() {
   const { user } = useAuth();
@@ -163,8 +242,35 @@ export default function About() {
     }
   };
 
+  // Repeat the archive photos enough times to fill a smooth, seamless
+  // marquee loop (translateX(-50%) only looks seamless if the track is an
+  // exact double of itself), and scale the animation duration to the number
+  // of tiles so the scroll speed feels similar regardless of how many
+  // photos have been uploaded.
+  let marqueeRepeat = photos.length > 0 ? Math.max(2, Math.ceil(10 / photos.length)) : 0;
+  if (marqueeRepeat % 2 !== 0) marqueeRepeat += 1;
+  const marqueePhotos = photos.length > 0
+    ? Array.from({ length: marqueeRepeat }, () => photos).flat()
+    : [];
+  const marqueeDuration = Math.max(22, marqueePhotos.length * 2.5);
+
   return (
     <section id="about" className="py-32 px-6 bg-white overflow-hidden">
+      <style>{`
+        @keyframes ikshana-marquee {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        .ikshana-marquee-track {
+          animation: ikshana-marquee linear infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ikshana-marquee-track {
+            animation: none !important;
+          }
+        }
+      `}</style>
+
       {featuredImage && showFeaturedImage && (
         <motion.div
           initial={{ y: 30, opacity: 0 }}
@@ -215,81 +321,186 @@ export default function About() {
       </motion.div>
 
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8" />
-        <div className="space-y-16 mb-8 sm:mb-12">
+        {/* Founding badges + impact strip */}
+        <motion.div
+          initial={{ y: 30, opacity: 0 }}
+          whileInView={{ y: 0, opacity: 1 }}
+          viewport={{ once: true }}
+          className="mb-20 sm:mb-28"
+        >
+          <div className="mb-8 flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-4 py-2 text-xs font-semibold text-brand-maroon/80 sm:text-sm">
+              <CalendarDays size={15} className="text-brand-maroon" />
+              Est. 2021
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-4 py-2 text-xs font-semibold text-brand-maroon/80 sm:text-sm">
+              <HandHeart size={15} className="text-brand-maroon" />
+              Community-led service
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 divide-x divide-brand-maroon/10 rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 shadow-sm">
+            <div className="flex flex-col items-center gap-1 px-2 py-8 text-center sm:gap-2 sm:py-10">
+              <Users size={20} className="mb-1 text-brand-maroon/50 sm:mb-2" />
+              <h3 className="font-serif text-3xl text-brand-maroon sm:text-4xl">100+</h3>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-brand-maroon/40 sm:text-[10px]">
+                Volunteers
+              </p>
+            </div>
+            <div className="flex flex-col items-center gap-1 px-2 py-8 text-center sm:gap-2 sm:py-10">
+              <HandHeart size={20} className="mb-1 text-brand-maroon/50 sm:mb-2" />
+              <h3 className="font-serif text-3xl text-brand-maroon sm:text-4xl">30+</h3>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-brand-maroon/40 sm:text-[10px]">
+                Donation Drives
+              </p>
+            </div>
+            <div className="flex flex-col items-center gap-1 px-2 py-8 text-center sm:gap-2 sm:py-10">
+              <Sparkles size={20} className="mb-1 text-brand-maroon/50 sm:mb-2" />
+              <h3 className="font-serif text-3xl text-brand-maroon sm:text-4xl">5+</h3>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-brand-maroon/40 sm:text-[10px]">
+                Awareness Programs
+              </p>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* The Ikshana Journey — signature timeline, 2021 to today */}
+        <div className="mb-20 sm:mb-28">
           <motion.div
-            initial={{ y: 30, opacity: 0 }}
+            initial={{ y: 20, opacity: 0 }}
             whileInView={{ y: 0, opacity: 1 }}
             viewport={{ once: true }}
-            className="max-w-6xl"
+            className="mb-12 sm:mb-16"
           >
-            <div className="flex items-center gap-4 mb-6">
-              <div className="h-[1px] w-12 bg-brand-maroon"></div>
+            <div className="mb-4 flex items-center gap-3">
+              <span className="h-px w-10 bg-brand-maroon/40" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
+                Our Story
+              </span>
             </div>
-            <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-              {isAdmin && (
-                <button 
-                  onClick={() => { setNewPhoto({ caption: "", category: "about", file: null }); setIsAdding(true); }}
-                  className="flex items-center gap-3 bg-brand-maroon text-white px-8 py-5 rounded-full font-bold tracking-widest uppercase text-[10px] hover:bg-stone-900 transition-all shadow-xl shadow-brand-maroon/20 self-start"
-                >
-                  <Camera size={16} />
-                  Add Team Photo
-                </button>
-              )}
+            <h2 className="font-serif text-4xl text-brand-maroon sm:text-5xl">The Ikshana Journey</h2>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-brand-maroon/60 sm:text-base">
+              Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
+            </p>
+          </motion.div>
+
+          <div className="relative">
+            {/* Spine: lightens at the start (2021) and deepens toward the
+                brand maroon at the end (today), a small visual echo of the
+                foundation's own growth. */}
+            <div
+              aria-hidden="true"
+              className="absolute left-[15px] top-2 bottom-2 w-px sm:left-1/2 sm:-translate-x-1/2"
+              style={{ background: "linear-gradient(to bottom, #f2b9c4, #7a1f2d)" }}
+            />
+
+            <div className="space-y-10 sm:space-y-14">
+              {journeyMilestones.map((milestone, index) => {
+                const Icon = milestone.icon;
+                const isRight = index % 2 === 1;
+
+                return (
+                  <motion.div
+                    key={milestone.year}
+                    initial={{ y: 24, opacity: 0 }}
+                    whileInView={{ y: 0, opacity: 1 }}
+                    viewport={{ once: true, margin: "-60px" }}
+                    transition={{ duration: 0.5, delay: 0.05 }}
+                    className={`relative flex flex-col gap-2 pl-10 sm:flex-row sm:items-center sm:gap-0 sm:pl-0 ${
+                      isRight ? "sm:flex-row-reverse" : ""
+                    }`}
+                  >
+                    <div
+                      aria-hidden="true"
+                      className="absolute left-[7px] top-0.5 z-10 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border-4 border-white shadow-md sm:left-1/2 sm:top-1/2 sm:-translate-y-1/2"
+                      style={{ backgroundColor: milestone.dot }}
+                    >
+                      <Icon size={11} className="text-white" />
+                    </div>
+
+                    <div className={`sm:w-1/2 ${isRight ? "sm:pl-10 sm:text-left" : "sm:pr-10 sm:text-right"}`}>
+                      <span className="font-serif text-2xl text-brand-maroon sm:text-3xl">{milestone.year}</span>
+                      <h4 className="mt-1 text-base font-bold text-brand-maroon sm:text-lg">{milestone.title}</h4>
+                      <p className="mt-1.5 text-sm leading-6 text-brand-maroon/65">{milestone.description}</p>
+                    </div>
+                    <div className="hidden sm:block sm:w-1/2" aria-hidden="true" />
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Auto-scrolling gallery of moments from the archive */}
+        {marqueePhotos.length > 0 && (
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            whileInView={{ y: 0, opacity: 1 }}
+            viewport={{ once: true }}
+            className="mb-20 sm:mb-28"
+          >
+            <div className="mb-6 flex items-center gap-3">
+              <span className="h-px w-10 bg-brand-maroon/40" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
+                Moments So Far
+              </span>
             </div>
 
-            <div className="space-y-8 text-brand-maroon/80 text-xl leading-relaxed">
-              {/* Founded & Community Section */}
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div className="flex items-center gap-3 rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 p-5 shadow-sm">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-maroon text-white">
-                    <CalendarDays size={22} />
-                  </div>
-                  <span className="text-sm font-medium text-brand-maroon/80">Founded in 2021</span>
-                </div>
-                <div className="flex items-center gap-3 rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 p-5 shadow-sm">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-maroon text-white">
-                    <HandHeart size={22} />
-                  </div>
-                  <span className="text-sm font-medium text-brand-maroon/80">Community-led service</span>
-                </div>
-              </div>
+            <div className="relative overflow-hidden rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 py-6">
+              <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-white to-transparent sm:w-24" />
+              <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-white to-transparent sm:w-24" />
 
-              {/* Volunteers & Donation Drives Section */}
-              <div className="grid gap-6 pt-4 sm:grid-cols-2">
-                <div className="group rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 p-6 shadow-sm">
-                  <div className="w-12 h-12 rounded-2xl bg-brand-maroon text-white flex items-center justify-center mb-4">
-                    <Users size={22} />
+              <div
+                className="ikshana-marquee-track flex w-max gap-4 px-4 hover:[animation-play-state:paused] sm:gap-6"
+                style={{ animationDuration: `${marqueeDuration}s` }}
+              >
+                {marqueePhotos.map((photo, index) => (
+                  <div
+                    key={`${photo.id}-${index}`}
+                    className="relative h-40 w-56 shrink-0 overflow-hidden rounded-2xl shadow-sm sm:h-52 sm:w-72"
+                  >
+                    <img
+                      src={photo.url}
+                      alt={photo.caption}
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
                   </div>
-                  <h3 className="text-4xl font-serif text-brand-maroon mb-1">100+</h3>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-brand-maroon/40">Volunteers</p>
-                </div>
-                <div className="group rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 p-6 shadow-sm">
-                  <div className="w-12 h-12 rounded-2xl bg-brand-maroon text-white flex items-center justify-center mb-4">
-                    <HandHeart size={22} />
-                  </div>
-                  <h3 className="text-4xl font-serif text-brand-maroon mb-1">30+</h3>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-brand-maroon/40">Donation Drives</p>
-                </div>
+                ))}
               </div>
-
-              {/* Awareness Section - Centered */}
-              <div className="flex justify-center pt-0">
-                <div className="group rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 p-6 shadow-sm w-full sm:w-1/2">
-                  <div className="w-12 h-12 rounded-2xl bg-brand-maroon text-white flex items-center justify-center mb-4 mx-auto">
-                    <Sparkles size={22} />
-                  </div>
-                  <h3 className="text-4xl font-serif text-brand-maroon mb-1 text-center">5+</h3>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-brand-maroon/40 text-center">Awareness Programs</p>
-                </div>
-              </div>
-
             </div>
           </motion.div>
-        </div>
+        )}
 
         {/* About Archive Section */}
         <div className="space-y-8">
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            whileInView={{ y: 0, opacity: 1 }}
+            viewport={{ once: true }}
+            className="flex flex-wrap items-center justify-between gap-4"
+          >
+            <div>
+              <div className="mb-4 flex items-center gap-3">
+                <span className="h-px w-10 bg-brand-maroon/40" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
+                  Foundation Archive
+                </span>
+              </div>
+              <h3 className="font-serif text-2xl text-brand-maroon sm:text-3xl">Behind the scenes</h3>
+            </div>
+
+            {isAdmin && (
+              <button 
+                onClick={() => { setNewPhoto({ caption: "", category: "about", file: null }); setIsAdding(true); }}
+                className="flex items-center gap-3 bg-brand-maroon text-white px-8 py-5 rounded-full font-bold tracking-widest uppercase text-[10px] hover:bg-stone-900 transition-all shadow-xl shadow-brand-maroon/20 self-start"
+              >
+                <Camera size={16} />
+                Add Team Photo
+              </button>
+            )}
+          </motion.div>
+
           {photos.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <AnimatePresence mode="popLayout">
