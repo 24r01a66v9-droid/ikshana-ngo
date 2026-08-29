@@ -121,9 +121,17 @@ const groupRowsIntoMemories = (rows: PhotoRow[]): Memory[] => {
 // Ikshana actually does, and each category gets its own color identity (a
 // top accent stripe, badge, and hover glow) so the three read as distinct at
 // a glance rather than just differently-labeled versions of the same card.
+//
+// NOTE: `shortLabel` used to be swapped in on mobile in place of the full
+// `label`/`plural` text. That was the cause of the truncated mobile text
+// ("Fundraising" instead of "Fundraising Event(s)") — the full label is now
+// always rendered everywhere, just at a smaller font size on narrow
+// screens, so `shortLabel` is unused. Left in place in case something else
+// still references it.
 const ARCHIVE_TYPES: {
   key: ArchiveType;
   label: string;
+  shortLabel: string;
   plural: string;
   icon: typeof Camera;
   chipClass: string;
@@ -134,6 +142,7 @@ const ARCHIVE_TYPES: {
   {
     key: "fundraising",
     label: "Fundraising Event",
+    shortLabel: "Fundraising",
     plural: "Fundraising Events",
     icon: Megaphone,
     chipClass: "bg-amber-100 text-amber-700",
@@ -144,6 +153,7 @@ const ARCHIVE_TYPES: {
   {
     key: "donation",
     label: "Donation Drive",
+    shortLabel: "Donation",
     plural: "Donation Drives",
     icon: HeartHandshake,
     chipClass: "bg-rose-100 text-rose-700",
@@ -154,6 +164,7 @@ const ARCHIVE_TYPES: {
   {
     key: "awareness",
     label: "Awareness & Outreach",
+    shortLabel: "Awareness",
     plural: "Awareness & Outreach",
     icon: BookOpen,
     chipClass: "bg-teal-100 text-teal-700",
@@ -1133,12 +1144,16 @@ export default function Gallery() {
         <div className="absolute top-1/4 right-0 w-[800px] h-[800px] bg-brand-maroon rounded-full blur-[160px]" />
       </div>
 
+      {/* FIX #3: the wrapper below now scales its horizontal padding up at
+          lg/xl so the header content (pill, tabs, button) fills more of the
+          width on large screens instead of leaving a big empty gutter next
+          to the full-bleed card grid underneath it. */}
       <div className="max-w-7xl mx-auto relative z-10">
         <motion.div
           initial={{ y: 24, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           viewport={{ once: true }}
-          className="rounded-[1.75rem] border border-brand-maroon/10 bg-white p-4 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.22)] sm:p-6 lg:p-8 xl:p-10"
+          className="rounded-[1.75rem] border border-brand-maroon/10 bg-white px-3 py-4 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.22)] sm:px-5 sm:py-6 lg:px-10 lg:py-10 xl:px-14 xl:py-12"
         >
           {/* Header */}
           <div className="mb-6 sm:mb-8">
@@ -1155,7 +1170,7 @@ export default function Gallery() {
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                className="font-serif text-5xl sm:text-6xl md:text-7xl leading-[0.95] tracking-tight text-brand-maroon"
+                className="font-serif text-5xl sm:text-6xl md:text-7xl lg:text-8xl leading-[0.95] tracking-tight text-brand-maroon"
               >
                 Team{" "}
                 <span className="relative inline-block italic">
@@ -1175,21 +1190,31 @@ export default function Gallery() {
               transition={{ delay: 0.15 }}
               className="mt-5 flex flex-col items-center gap-4 sm:mt-6 sm:gap-5"
             >
-              <div className="inline-flex max-w-full items-center gap-2.5 rounded-full border border-brand-maroon/10 bg-[#fff8f5] px-5 py-2.5 shadow-[0_14px_34px_-24px_rgba(139,29,59,0.45)] sm:gap-3 sm:px-6 sm:py-3">
+              {/* FIX #3: bigger padding/text at lg so the pill doesn't look
+                  tiny relative to the wider header on desktop. */}
+              <div className="inline-flex max-w-full items-center gap-2.5 rounded-full border border-brand-maroon/10 bg-[#fff8f5] px-5 py-2.5 shadow-[0_14px_34px_-24px_rgba(139,29,59,0.45)] sm:gap-3 sm:px-6 sm:py-3 lg:gap-4 lg:px-8 lg:py-3.5">
                 <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-brand-maroon/35" />
-                <p className="text-center text-xs font-medium leading-5 tracking-wide text-brand-maroon/75 sm:text-sm">
+                <p className="text-center text-xs font-medium leading-5 tracking-wide text-brand-maroon/75 sm:text-sm lg:text-base lg:leading-6">
                   Our team members, our milestones, the moments that shaped who we are.
                 </p>
                 <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-brand-maroon/35" />
               </div>
 
-              {/* Category filter — a horizontally-scrollable pill row works at
-                  any tab count/screen width, unlike a fixed-column grid. */}
-              <div className="flex w-full max-w-full flex-wrap justify-center gap-2">
+              {/* Category filter — on mobile this is a fixed 4-column grid so
+                  all four options are visible on screen at once with no
+                  horizontal scrolling; from sm up it relaxes into a normal
+                  wrapping pill row since there's room to spare.
+
+                  FIX #1: the full category name is now always shown (no more
+                  shortLabel swap on mobile) — font size/tracking scale down
+                  on narrow screens instead of the text being truncated to a
+                  shorter label. FIX #3: tabs get extra padding/text size at
+                  lg so they read as full-size pills on desktop. */}
+              <div className="grid w-full grid-cols-4 gap-1.5 sm:flex sm:w-auto sm:max-w-full sm:flex-wrap sm:justify-center sm:gap-2">
                 <button
                   type="button"
                   onClick={() => setActiveType("all")}
-                  className={`shrink-0 rounded-full border px-4 py-2 text-xs font-semibold transition-all sm:text-sm ${
+                  className={`flex w-full flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 text-[10px] font-semibold leading-tight transition-all sm:w-auto sm:flex-row sm:gap-1.5 sm:rounded-full sm:px-4 sm:py-2 sm:text-sm lg:px-5 lg:py-2.5 lg:text-base ${
                     activeType === "all"
                       ? "border-brand-maroon bg-brand-maroon text-white shadow-sm"
                       : "border-brand-maroon/15 bg-white text-brand-maroon/70 hover:border-brand-maroon/30 hover:text-brand-maroon"
@@ -1199,19 +1224,20 @@ export default function Gallery() {
                 </button>
                 {ARCHIVE_TYPES.map((type) => {
                   const Icon = type.icon;
+                  const active = activeType === type.key;
                   return (
                     <button
                       key={type.key}
                       type="button"
                       onClick={() => setActiveType(type.key)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all sm:text-sm ${
-                        activeType === type.key
+                      className={`flex w-full flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 text-center text-[8px] font-semibold leading-[1.15] transition-all sm:w-auto sm:flex-row sm:gap-1.5 sm:rounded-full sm:px-4 sm:py-2 sm:text-sm lg:px-5 lg:py-2.5 lg:text-base ${
+                        active
                           ? type.activeTabClass
                           : "border-brand-maroon/15 bg-white text-brand-maroon/70 hover:border-brand-maroon/30 hover:text-brand-maroon"
                       }`}
                     >
-                      <Icon size={13} />
-                      {type.plural}
+                      <Icon size={13} className="shrink-0" />
+                      <span className="leading-[1.15]">{type.plural}</span>
                     </button>
                   );
                 })}
@@ -1222,7 +1248,7 @@ export default function Gallery() {
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={openAddForm}
-                  className="inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-brand-maroon px-6 py-3.5 text-sm font-bold text-white shadow-xl shadow-brand-maroon/20 transition hover:bg-stone-900 sm:w-auto sm:px-7 sm:py-4"
+                  className="inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-brand-maroon px-6 py-3.5 text-sm font-bold text-white shadow-xl shadow-brand-maroon/20 transition hover:bg-stone-900 sm:w-auto sm:px-7 sm:py-4 lg:px-9 lg:py-4.5 lg:text-base"
                 >
                   <Camera size={18} />
                   Add a Memory
@@ -1365,10 +1391,17 @@ export default function Gallery() {
                       </div>
 
                       <div className="flex flex-1 flex-col px-2 pb-2 pt-3 sm:px-2.5 sm:pb-2.5 sm:pt-4">
+                        {/* FIX #2: always render the full category label
+                            (typeMeta.label) instead of swapping to
+                            typeMeta.shortLabel on mobile. Font size/tracking
+                            drop on narrow screens so it still fits the
+                            2-column card width without truncating or
+                            wrapping awkwardly. */}
                         <span
-                          className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.14em] sm:text-[10px] ${typeMeta.chipClass}`}
+                          className={`inline-flex w-fit max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-[7px] font-bold uppercase tracking-[0.05em] sm:gap-1.5 sm:px-2.5 sm:text-[10px] sm:tracking-[0.14em] ${typeMeta.chipClass}`}
                         >
-                          <TypeIcon size={11} />
+                          <TypeIcon size={10} className="shrink-0 sm:hidden" />
+                          <TypeIcon size={11} className="hidden shrink-0 sm:block" />
                           {typeMeta.label}
                         </span>
 
