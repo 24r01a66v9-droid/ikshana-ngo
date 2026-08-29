@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ImageIcon,
@@ -6,6 +6,7 @@ import {
   X,
   Upload,
   Trash2,
+  Pencil,
   Camera,
   Star,
   Eye,
@@ -29,65 +30,176 @@ interface AboutPhoto {
   is_featured: boolean;
 }
 
-// The Ikshana story, year by year. This is real narrative content (not a
-// generic "01 / 02 / 03" list) — edit the copy here as milestones change or
-// new years are added. `dot` is a hex color so the timeline can visibly
-// deepen from a young, light rose in 2021 to the full brand maroon today,
-// standing in for the foundation's growth without relying on stock icons.
-const journeyMilestones: {
+/* ------------------------------------------------------------------ */
+/*  Journey timeline — admin-editable                                  */
+/* ------------------------------------------------------------------ */
+/*
+ * Milestones default to this hardcoded list, but are editable by an admin
+ * (add / edit / delete via the modal below). Edits are saved to
+ * localStorage immediately (so they always persist for this browser) and
+ * also POSTed to /api/milestones if that endpoint exists on the backend —
+ * if it doesn't yet, the page still works, it just won't sync across
+ * devices until that endpoint is added.
+ */
+
+const MILESTONE_ICONS = {
+  sprout: Sprout,
+  handheart: HandHeart,
+  bookopen: BookOpen,
+  megaphone: Megaphone,
+  users: Users,
+  sparkles: Sparkles,
+  star: Star,
+} as const;
+
+type MilestoneIconKey = keyof typeof MILESTONE_ICONS;
+
+interface Milestone {
+  id: string;
   year: string;
   title: string;
   description: string;
-  icon: typeof Sprout;
-  dot: string;
-}[] = [
+  iconKey: MilestoneIconKey;
+}
+
+const DEFAULT_MILESTONES: Milestone[] = [
   {
+    id: "m-2021",
     year: "2021",
     title: "Where it began",
     description:
       "A small group of volunteers came together around one idea: service should be community-led, not charity delivered from a distance.",
-    icon: Sprout,
-    dot: "#f2b9c4",
+    iconKey: "sprout",
   },
   {
+    id: "m-2022",
     year: "2022",
     title: "First visits, first bonds",
     description:
       "Regular visits to orphanages and old-age homes began, turning one-off drives into relationships that lasted well beyond a single afternoon.",
-    icon: HandHeart,
-    dot: "#e28fa0",
+    iconKey: "handheart",
   },
   {
+    id: "m-2023",
     year: "2023",
     title: "Beyond the visit",
     description:
       "Ikshana started offering direct support for medical treatment and school fees for the families it had come to know.",
-    icon: BookOpen,
-    dot: "#c96a80",
+    iconKey: "bookopen",
   },
   {
+    id: "m-2024",
     year: "2024",
     title: "Raising our voice",
     description:
       "Awareness programs on health, education and elder care brought the wider community into the work, not just the volunteers doing it.",
-    icon: Megaphone,
-    dot: "#a94860",
+    iconKey: "megaphone",
   },
   {
+    id: "m-2025",
     year: "2025",
     title: "Growing hands",
     description:
       "Volunteer numbers crossed 100, and donation drives became a steady rhythm across the calendar rather than occasional events.",
-    icon: Users,
-    dot: "#8a2f47",
+    iconKey: "users",
   },
   {
+    id: "m-2026",
     year: "2026",
     title: "Today",
     description:
       "Ikshana continues as a volunteer-run foundation — still community-led, still shaped by the people it serves.",
+    iconKey: "sparkles",
+  },
+];
+
+const MILESTONES_STORAGE_KEY = "ikshana-journey-milestones";
+
+// Interpolates the timeline dot color from a young, light rose to the full
+// brand maroon based on position — a small visual echo of the foundation's
+// growth, computed automatically so nobody has to pick colors by hand when
+// adding a milestone.
+const lerpHexColor = (from: string, to: string, t: number) => {
+  const f = parseInt(from.slice(1), 16);
+  const g = parseInt(to.slice(1), 16);
+  const fr = (f >> 16) & 255, fg = (f >> 8) & 255, fb = f & 255;
+  const gr = (g >> 16) & 255, gg = (g >> 8) & 255, gb = g & 255;
+  const r = Math.round(fr + (gr - fr) * t);
+  const gCh = Math.round(fg + (gg - fg) * t);
+  const b = Math.round(fb + (gb - fb) * t);
+  return `#${((1 << 24) + (r << 16) + (gCh << 8) + b).toString(16).slice(1)}`;
+};
+const getDotColor = (index: number, total: number) =>
+  lerpHexColor("#f2b9c4", "#7a1f2d", total <= 1 ? 1 : index / (total - 1));
+
+const EMPTY_MILESTONE_FORM = { year: "", title: "", description: "", iconKey: "sprout" as MilestoneIconKey };
+
+/* ------------------------------------------------------------------ */
+/*  Animated stat counter                                              */
+/* ------------------------------------------------------------------ */
+
+function CountUpStat({ value, suffix = "" }: { value: number; suffix?: string }) {
+  const [display, setDisplay] = useState(0);
+  const hasRun = useRef(false);
+
+  return (
+    <motion.span
+      onViewportEnter={() => {
+        if (hasRun.current) return;
+        hasRun.current = true;
+        const duration = 1200;
+        const start = performance.now();
+        const tick = (now: number) => {
+          const progress = Math.min(1, (now - start) / duration);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          setDisplay(Math.round(eased * value));
+          if (progress < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }}
+      viewport={{ once: true, margin: "-40px" }}
+    >
+      {display}
+      {suffix}
+    </motion.span>
+  );
+}
+
+const STATS: {
+  label: string;
+  value: number;
+  icon: typeof Users;
+  iconBg: string;
+  iconColor: string;
+  accent: string;
+  border: string;
+}[] = [
+  {
+    label: "Volunteers",
+    value: 100,
+    icon: Users,
+    iconBg: "bg-amber-100",
+    iconColor: "text-amber-600",
+    accent: "bg-amber-300",
+    border: "border-amber-100",
+  },
+  {
+    label: "Donation Drives",
+    value: 30,
+    icon: HandHeart,
+    iconBg: "bg-rose-100",
+    iconColor: "text-rose-600",
+    accent: "bg-rose-300",
+    border: "border-rose-100",
+  },
+  {
+    label: "Awareness Programs",
+    value: 5,
     icon: Sparkles,
-    dot: "#7a1f2d",
+    iconBg: "bg-teal-100",
+    iconColor: "text-teal-600",
+    accent: "bg-teal-300",
+    border: "border-teal-100",
   },
 ];
 
@@ -107,6 +219,11 @@ export default function About() {
   const [newPhoto, setNewPhoto] = useState({ caption: "", category: "about", file: null as File | null });
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [milestones, setMilestones] = useState<Milestone[]>(DEFAULT_MILESTONES);
+  const [isMilestoneFormOpen, setIsMilestoneFormOpen] = useState(false);
+  const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null);
+  const [milestoneForm, setMilestoneForm] = useState(EMPTY_MILESTONE_FORM);
 
   const fetchPhotos = async () => {
     try {
@@ -144,6 +261,104 @@ export default function About() {
   useEffect(() => {
     fetchPhotos();
   }, []);
+
+  // Load journey milestones: try the backend first, fall back to whatever
+  // was last saved locally, and fall back again to the hardcoded defaults.
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch("/api/milestones");
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setMilestones([...data].sort((a, b) => a.year.localeCompare(b.year)));
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("No /api/milestones endpoint yet — using local data.", e);
+      }
+
+      try {
+        const stored = window.localStorage.getItem(MILESTONES_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) setMilestones(parsed);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const persistMilestones = (updated: Milestone[]) => {
+    const sorted = [...updated].sort((a, b) => a.year.localeCompare(b.year));
+    setMilestones(sorted);
+    window.localStorage.setItem(MILESTONES_STORAGE_KEY, JSON.stringify(sorted));
+    return sorted;
+  };
+
+  const openAddMilestone = () => {
+    setEditingMilestoneId(null);
+    setMilestoneForm(EMPTY_MILESTONE_FORM);
+    setIsMilestoneFormOpen(true);
+  };
+
+  const openEditMilestone = (milestone: Milestone) => {
+    setEditingMilestoneId(milestone.id);
+    setMilestoneForm({
+      year: milestone.year,
+      title: milestone.title,
+      description: milestone.description,
+      iconKey: milestone.iconKey,
+    });
+    setIsMilestoneFormOpen(true);
+  };
+
+  const closeMilestoneForm = () => {
+    setIsMilestoneFormOpen(false);
+    setEditingMilestoneId(null);
+    setMilestoneForm(EMPTY_MILESTONE_FORM);
+  };
+
+  const handleMilestoneSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!milestoneForm.year.trim() || !milestoneForm.title.trim()) return;
+
+    const payload = {
+      year: milestoneForm.year.trim(),
+      title: milestoneForm.title.trim(),
+      description: milestoneForm.description.trim(),
+      iconKey: milestoneForm.iconKey,
+    };
+
+    const updated = editingMilestoneId
+      ? milestones.map((m) => (m.id === editingMilestoneId ? { ...m, ...payload } : m))
+      : [...milestones, { id: `m-${Date.now()}`, ...payload }];
+
+    persistMilestones(updated);
+
+    try {
+      const url = editingMilestoneId ? `/api/milestones/${editingMilestoneId}` : "/api/milestones";
+      await fetch(url, buildAuthRequestInit({
+        method: editingMilestoneId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }));
+    } catch (err) {
+      console.warn("Milestone saved locally; /api/milestones is not available yet.", err);
+    }
+
+    closeMilestoneForm();
+  };
+
+  const removeMilestone = async (id: string) => {
+    if (!window.confirm("Delete this milestone?")) return;
+    persistMilestones(milestones.filter((m) => m.id !== id));
+    try {
+      await fetch(`/api/milestones/${id}`, buildAuthRequestInit({ method: "DELETE" }));
+    } catch (err) {
+      console.warn("Milestone deleted locally; /api/milestones is not available yet.", err);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -255,7 +470,7 @@ export default function About() {
   const marqueeDuration = Math.max(22, marqueePhotos.length * 2.5);
 
   return (
-    <section id="about" className="py-32 px-6 bg-white overflow-hidden">
+    <section id="about" className="py-24 px-4 sm:py-32 sm:px-6 bg-white overflow-hidden">
       <style>{`
         @keyframes ikshana-marquee {
           from { transform: translateX(0); }
@@ -276,9 +491,19 @@ export default function About() {
           initial={{ y: 30, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           viewport={{ once: true }}
-          className="relative -mx-6 mb-16 sm:-mx-8 lg:-mx-10"
+          className="relative -mx-4 mb-16 sm:-mx-6 lg:-mx-10"
         >
-          <div className="relative h-[75vh] sm:h-[85vh] lg:h-[92vh] overflow-hidden rounded-b-[2.5rem] shadow-2xl">
+          {/* Mobile: object-contain (full photo, nothing cropped) inside a
+              shorter box, with a blurred copy of the same image filling the
+              background so there's no stark empty letterboxing. Desktop
+              keeps the tall, cinematic object-cover banner. */}
+          <div className="relative h-[46vh] overflow-hidden rounded-b-[2rem] bg-brand-maroon/5 shadow-2xl sm:h-[85vh] sm:rounded-b-[2.5rem] lg:h-[92vh]">
+            <img
+              src={featuredImage}
+              alt=""
+              aria-hidden="true"
+              className="absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl sm:hidden"
+            />
             <div className="absolute right-4 top-4 z-10 flex gap-2 sm:right-6 sm:top-6">
               {isAdmin && featuredImage && (
                 <button
@@ -299,253 +524,301 @@ export default function About() {
                 </button>
               )}
             </div>
-            <img 
-              src={featuredImage} 
-              alt="About Featured" 
-              className="h-full w-full object-cover"
+            <img
+              src={featuredImage}
+              alt="About Featured"
+              className="relative h-full w-full object-contain sm:object-cover"
               referrerPolicy="no-referrer"
             />
           </div>
         </motion.div>
       )}
 
-      <motion.div
-        initial={{ y: 30, opacity: 0 }}
-        whileInView={{ y: 0, opacity: 1 }}
-        viewport={{ once: true }}
-        className="mt-12 mb-16 max-w-7xl mx-auto px-6"
-      >
-        <p className="max-w-3xl text-lg leading-relaxed text-brand-maroon/80 italic sm:text-xl">
-          We work to support communities in need, raise awareness about important social causes, and inspire people to come together for a better tomorrow.
-        </p>
-      </motion.div>
+      <div className="relative mx-auto max-w-[96rem]">
+        <div className="pointer-events-none absolute -top-10 right-0 h-[500px] w-[500px] rounded-full bg-brand-maroon opacity-[0.02] blur-[160px]" />
 
-      <div className="max-w-7xl mx-auto">
-        {/* Founding badges + impact strip */}
         <motion.div
-          initial={{ y: 30, opacity: 0 }}
+          initial={{ y: 24, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           viewport={{ once: true }}
-          className="mb-20 sm:mb-28"
+          className="relative rounded-[1.75rem] border border-brand-maroon/10 bg-white p-4 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.22)] sm:p-6 lg:p-8"
         >
-          <div className="mb-8 flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-4 py-2 text-xs font-semibold text-brand-maroon/80 sm:text-sm">
-              <CalendarDays size={15} className="text-brand-maroon" />
-              Est. 2021
-            </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-4 py-2 text-xs font-semibold text-brand-maroon/80 sm:text-sm">
-              <HandHeart size={15} className="text-brand-maroon" />
-              Community-led service
-            </span>
-          </div>
-
-          <div className="grid grid-cols-3 divide-x divide-brand-maroon/10 rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 shadow-sm">
-            <div className="flex flex-col items-center gap-1 px-2 py-8 text-center sm:gap-2 sm:py-10">
-              <Users size={20} className="mb-1 text-brand-maroon/50 sm:mb-2" />
-              <h3 className="font-serif text-3xl text-brand-maroon sm:text-4xl">100+</h3>
-              <p className="text-[9px] font-bold uppercase tracking-widest text-brand-maroon/40 sm:text-[10px]">
-                Volunteers
-              </p>
-            </div>
-            <div className="flex flex-col items-center gap-1 px-2 py-8 text-center sm:gap-2 sm:py-10">
-              <HandHeart size={20} className="mb-1 text-brand-maroon/50 sm:mb-2" />
-              <h3 className="font-serif text-3xl text-brand-maroon sm:text-4xl">30+</h3>
-              <p className="text-[9px] font-bold uppercase tracking-widest text-brand-maroon/40 sm:text-[10px]">
-                Donation Drives
-              </p>
-            </div>
-            <div className="flex flex-col items-center gap-1 px-2 py-8 text-center sm:gap-2 sm:py-10">
-              <Sparkles size={20} className="mb-1 text-brand-maroon/50 sm:mb-2" />
-              <h3 className="font-serif text-3xl text-brand-maroon sm:text-4xl">5+</h3>
-              <p className="text-[9px] font-bold uppercase tracking-widest text-brand-maroon/40 sm:text-[10px]">
-                Awareness Programs
-              </p>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* The Ikshana Journey — signature timeline, 2021 to today */}
-        <div className="mb-20 sm:mb-28">
-          <motion.div
+          <motion.p
             initial={{ y: 20, opacity: 0 }}
             whileInView={{ y: 0, opacity: 1 }}
             viewport={{ once: true }}
-            className="mb-12 sm:mb-16"
+            className="mb-16 max-w-3xl text-lg leading-relaxed text-brand-maroon/80 italic sm:mb-20 sm:text-xl"
           >
-            <div className="mb-4 flex items-center gap-3">
-              <span className="h-px w-10 bg-brand-maroon/40" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
-                Our Story
-              </span>
-            </div>
-            <h2 className="font-serif text-4xl text-brand-maroon sm:text-5xl">The Ikshana Journey</h2>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-brand-maroon/60 sm:text-base">
-              Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
-            </p>
-          </motion.div>
+            We work to support communities in need, raise awareness about important social causes, and inspire people to come together for a better tomorrow.
+          </motion.p>
 
-          <div className="relative">
-            {/* Spine: lightens at the start (2021) and deepens toward the
-                brand maroon at the end (today), a small visual echo of the
-                foundation's own growth. */}
-            <div
-              aria-hidden="true"
-              className="absolute left-[15px] top-2 bottom-2 w-px sm:left-1/2 sm:-translate-x-1/2"
-              style={{ background: "linear-gradient(to bottom, #f2b9c4, #7a1f2d)" }}
-            />
-
-            <div className="space-y-10 sm:space-y-14">
-              {journeyMilestones.map((milestone, index) => {
-                const Icon = milestone.icon;
-                const isRight = index % 2 === 1;
-
-                return (
-                  <motion.div
-                    key={milestone.year}
-                    initial={{ y: 24, opacity: 0 }}
-                    whileInView={{ y: 0, opacity: 1 }}
-                    viewport={{ once: true, margin: "-60px" }}
-                    transition={{ duration: 0.5, delay: 0.05 }}
-                    className={`relative flex flex-col gap-2 pl-10 sm:flex-row sm:items-center sm:gap-0 sm:pl-0 ${
-                      isRight ? "sm:flex-row-reverse" : ""
-                    }`}
-                  >
-                    <div
-                      aria-hidden="true"
-                      className="absolute left-[7px] top-0.5 z-10 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border-4 border-white shadow-md sm:left-1/2 sm:top-1/2 sm:-translate-y-1/2"
-                      style={{ backgroundColor: milestone.dot }}
-                    >
-                      <Icon size={11} className="text-white" />
-                    </div>
-
-                    <div className={`sm:w-1/2 ${isRight ? "sm:pl-10 sm:text-left" : "sm:pr-10 sm:text-right"}`}>
-                      <span className="font-serif text-2xl text-brand-maroon sm:text-3xl">{milestone.year}</span>
-                      <h4 className="mt-1 text-base font-bold text-brand-maroon sm:text-lg">{milestone.title}</h4>
-                      <p className="mt-1.5 text-sm leading-6 text-brand-maroon/65">{milestone.description}</p>
-                    </div>
-                    <div className="hidden sm:block sm:w-1/2" aria-hidden="true" />
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Auto-scrolling gallery of moments from the archive */}
-        {marqueePhotos.length > 0 && (
+          {/* Founding badges + impact strip */}
           <motion.div
-            initial={{ y: 20, opacity: 0 }}
+            initial={{ y: 30, opacity: 0 }}
             whileInView={{ y: 0, opacity: 1 }}
             viewport={{ once: true }}
             className="mb-20 sm:mb-28"
           >
-            <div className="mb-6 flex items-center gap-3">
-              <span className="h-px w-10 bg-brand-maroon/40" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
-                Moments So Far
+            <div className="mb-8 flex flex-wrap items-center justify-center gap-3 sm:mb-10">
+              <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-5 py-3 text-sm font-semibold text-brand-maroon/80 sm:text-base">
+                <CalendarDays size={17} className="text-brand-maroon" />
+                Est. 2021
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-5 py-3 text-sm font-semibold text-brand-maroon/80 sm:text-base">
+                <HandHeart size={17} className="text-brand-maroon" />
+                Community-led service
               </span>
             </div>
 
-            <div className="relative overflow-hidden rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 py-6">
-              <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-white to-transparent sm:w-24" />
-              <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-white to-transparent sm:w-24" />
-
-              <div
-                className="ikshana-marquee-track flex w-max gap-4 px-4 hover:[animation-play-state:paused] sm:gap-6"
-                style={{ animationDuration: `${marqueeDuration}s` }}
-              >
-                {marqueePhotos.map((photo, index) => (
-                  <div
-                    key={`${photo.id}-${index}`}
-                    className="relative h-40 w-56 shrink-0 overflow-hidden rounded-2xl shadow-sm sm:h-52 sm:w-72"
+            <div className="grid grid-cols-3 gap-3 sm:gap-5">
+              {STATS.map((stat) => {
+                const Icon = stat.icon;
+                return (
+                  <motion.div
+                    key={stat.label}
+                    whileHover={{ y: -4 }}
+                    className={`relative overflow-hidden rounded-[1.35rem] border bg-white p-4 text-center shadow-sm transition-shadow hover:shadow-lg sm:rounded-[1.75rem] sm:p-8 ${stat.border}`}
                   >
-                    <img
-                      src={photo.url}
-                      alt={photo.caption}
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                ))}
-              </div>
+                    <span aria-hidden="true" className={`absolute inset-x-0 top-0 h-1 ${stat.accent}`} />
+                    <div className={`mx-auto mb-2.5 flex h-10 w-10 items-center justify-center rounded-2xl sm:mb-4 sm:h-14 sm:w-14 ${stat.iconBg}`}>
+                      <Icon size={18} className={`${stat.iconColor} sm:h-6 sm:w-6`} />
+                    </div>
+                    <h3 className="font-serif text-2xl text-brand-maroon sm:text-4xl lg:text-5xl">
+                      <CountUpStat value={stat.value} suffix="+" />
+                    </h3>
+                    <p className="mt-1.5 text-[8px] font-bold uppercase leading-tight tracking-wider text-brand-maroon/45 sm:mt-2 sm:text-[10px] sm:tracking-[0.15em]">
+                      {stat.label}
+                    </p>
+                  </motion.div>
+                );
+              })}
             </div>
           </motion.div>
-        )}
 
-        {/* About Archive Section */}
-        <div className="space-y-8">
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            whileInView={{ y: 0, opacity: 1 }}
-            viewport={{ once: true }}
-            className="flex flex-wrap items-center justify-between gap-4"
-          >
-            <div>
-              <div className="mb-4 flex items-center gap-3">
+          {/* The Ikshana Journey — signature timeline, 2021 to today */}
+          <div className="mb-20 sm:mb-28">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              whileInView={{ y: 0, opacity: 1 }}
+              viewport={{ once: true }}
+              className="mb-12 flex flex-col gap-4 sm:mb-16 sm:flex-row sm:items-end sm:justify-between"
+            >
+              <div>
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="h-px w-10 bg-brand-maroon/40" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
+                    Our Story
+                  </span>
+                </div>
+                <h2 className="font-serif text-4xl text-brand-maroon sm:text-5xl">The Ikshana Journey</h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-brand-maroon/60 sm:text-base">
+                  Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
+                </p>
+              </div>
+
+              {isAdmin && (
+                <button
+                  onClick={openAddMilestone}
+                  className="inline-flex items-center gap-2 self-start rounded-full bg-brand-maroon px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900 sm:self-auto"
+                >
+                  <Plus size={15} />
+                  Add Milestone
+                </button>
+              )}
+            </motion.div>
+
+            <div className="relative">
+              {/* Spine: lightens at the start (2021) and deepens toward the
+                  brand maroon at the end (today), a small visual echo of the
+                  foundation's own growth. */}
+              <div
+                aria-hidden="true"
+                className="absolute left-[15px] top-2 bottom-2 w-px sm:left-1/2 sm:-translate-x-1/2"
+                style={{ background: "linear-gradient(to bottom, #f2b9c4, #7a1f2d)" }}
+              />
+
+              <div className="space-y-8 sm:space-y-12">
+                {milestones.map((milestone, index) => {
+                  const Icon = MILESTONE_ICONS[milestone.iconKey] ?? Sparkles;
+                  const isRight = index % 2 === 1;
+                  const dotColor = getDotColor(index, milestones.length);
+
+                  return (
+                    <motion.div
+                      key={milestone.id}
+                      initial={{ y: 24, opacity: 0 }}
+                      whileInView={{ y: 0, opacity: 1 }}
+                      viewport={{ once: true, margin: "-60px" }}
+                      transition={{ duration: 0.5, delay: 0.05 }}
+                      className={`relative flex flex-col gap-2 pl-10 sm:flex-row sm:items-center sm:gap-0 sm:pl-0 ${
+                        isRight ? "sm:flex-row-reverse" : ""
+                      }`}
+                    >
+                      <div
+                        aria-hidden="true"
+                        className="absolute left-[7px] top-3 z-10 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border-4 border-white shadow-md sm:left-1/2 sm:top-1/2 sm:-translate-y-1/2"
+                        style={{ backgroundColor: dotColor }}
+                      >
+                        <Icon size={11} className="text-white" />
+                      </div>
+
+                      <div className={`sm:w-1/2 ${isRight ? "sm:pl-10" : "sm:pr-10"}`}>
+                        <div className="group relative rounded-[1.5rem] border border-brand-maroon/10 bg-white p-5 shadow-[0_14px_34px_-22px_rgba(91,63,212,0.3)] transition-all hover:-translate-y-1 hover:shadow-[0_22px_44px_-20px_rgba(91,63,212,0.35)] sm:rounded-[1.75rem] sm:p-7">
+                          {isAdmin && (
+                            <div className="absolute right-3 top-3 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                type="button"
+                                onClick={() => openEditMilestone(milestone)}
+                                className="rounded-full border border-brand-maroon/10 bg-white p-1.5 text-brand-maroon shadow-sm transition hover:bg-brand-maroon hover:text-white"
+                                title="Edit milestone"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeMilestone(milestone.id)}
+                                className="rounded-full border border-brand-maroon/10 bg-white p-1.5 text-brand-maroon shadow-sm transition hover:bg-brand-maroon hover:text-white"
+                                title="Delete milestone"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          )}
+
+                          <span className="font-serif text-2xl sm:text-3xl" style={{ color: dotColor }}>
+                            {milestone.year}
+                          </span>
+                          <h4 className="mt-1.5 text-base font-bold text-brand-maroon sm:text-lg">{milestone.title}</h4>
+                          <p className="mt-1.5 text-sm leading-6 text-brand-maroon/65">{milestone.description}</p>
+                        </div>
+                      </div>
+                      <div className="hidden sm:block sm:w-1/2" aria-hidden="true" />
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Auto-scrolling gallery of moments from the archive */}
+          {marqueePhotos.length > 0 && (
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              whileInView={{ y: 0, opacity: 1 }}
+              viewport={{ once: true }}
+              className="mb-20 sm:mb-28"
+            >
+              <div className="mb-6 flex items-center gap-3">
                 <span className="h-px w-10 bg-brand-maroon/40" />
                 <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
-                  Foundation Archive
+                  Moments So Far
                 </span>
               </div>
-              <h3 className="font-serif text-2xl text-brand-maroon sm:text-3xl">Behind the scenes</h3>
-            </div>
 
-            {isAdmin && (
-              <button 
-                onClick={() => { setNewPhoto({ caption: "", category: "about", file: null }); setIsAdding(true); }}
-                className="flex items-center gap-3 bg-brand-maroon text-white px-8 py-5 rounded-full font-bold tracking-widest uppercase text-[10px] hover:bg-stone-900 transition-all shadow-xl shadow-brand-maroon/20 self-start"
-              >
-                <Camera size={16} />
-                Add Team Photo
-              </button>
-            )}
-          </motion.div>
+              <div className="relative overflow-hidden rounded-[2rem] border border-brand-maroon/10 bg-brand-maroon/5 py-6">
+                <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-white to-transparent sm:w-24" />
+                <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-white to-transparent sm:w-24" />
 
-          {photos.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              <AnimatePresence mode="popLayout">
-                {photos.map((photo, index) => (
-                  <motion.div
-                    key={photo.id}
-                    layout
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group relative aspect-[3/4] rounded-[2rem] overflow-hidden bg-stone-100 border border-stone-100"
-                  >
-                    <img 
-                      src={photo.url} 
-                      alt={photo.caption}
-                      className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-brand-maroon/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-8">
-                      <p className="text-white font-serif text-sm mb-4 leading-tight">{photo.caption}</p>
-                      {isAdmin && (
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => featurePhoto(photo.id)}
-                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${photo.is_featured ? 'bg-brand-maroon text-white' : 'bg-white/20 backdrop-blur-md text-white hover:bg-brand-maroon'}`}
-                            title="Set as Main Image"
-                          >
-                            <Star size={16} fill={photo.is_featured ? "currentColor" : "none"} />
-                          </button>
-                          <button 
-                            onClick={() => removePhoto(photo.id)}
-                            className="w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-maroon transition-colors"
-                            title="Remove from archive"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      )}
+                <div
+                  className="ikshana-marquee-track flex w-max gap-4 px-4 hover:[animation-play-state:paused] sm:gap-6"
+                  style={{ animationDuration: `${marqueeDuration}s` }}
+                >
+                  {marqueePhotos.map((photo, index) => (
+                    <div
+                      key={`${photo.id}-${index}`}
+                      className="relative h-40 w-56 shrink-0 overflow-hidden rounded-2xl shadow-sm sm:h-52 sm:w-72"
+                    >
+                      <img
+                        src={photo.url}
+                        alt={photo.caption}
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                      />
                     </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
           )}
-        </div>
+
+          {/* About Archive Section */}
+          <div className="space-y-8">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              whileInView={{ y: 0, opacity: 1 }}
+              viewport={{ once: true }}
+              className="flex flex-wrap items-center justify-between gap-4"
+            >
+              <div>
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="h-px w-10 bg-brand-maroon/40" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
+                    Faces &amp; Moments
+                  </span>
+                </div>
+                <h3 className="font-serif text-2xl text-brand-maroon sm:text-3xl">The people behind the work</h3>
+                <p className="mt-2 max-w-md text-sm leading-6 text-brand-maroon/60">
+                  A closer look at the volunteers, events, and everyday moments that make up Ikshana.
+                </p>
+              </div>
+
+              {isAdmin && (
+                <button 
+                  onClick={() => { setNewPhoto({ caption: "", category: "about", file: null }); setIsAdding(true); }}
+                  className="flex items-center gap-3 bg-brand-maroon text-white px-8 py-5 rounded-full font-bold tracking-widest uppercase text-[10px] hover:bg-stone-900 transition-all shadow-xl shadow-brand-maroon/20 self-start"
+                >
+                  <Camera size={16} />
+                  Add Team Photo
+                </button>
+              )}
+            </motion.div>
+
+            {photos.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <AnimatePresence mode="popLayout">
+                  {photos.map((photo, index) => (
+                    <motion.div
+                      key={photo.id}
+                      layout
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="group relative aspect-[3/4] rounded-[2rem] overflow-hidden bg-stone-100 border border-stone-100"
+                    >
+                      <img 
+                        src={photo.url} 
+                        alt={photo.caption}
+                        className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-brand-maroon/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-8">
+                        <p className="text-white font-serif text-sm mb-4 leading-tight">{photo.caption}</p>
+                        {isAdmin && (
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => featurePhoto(photo.id)}
+                              className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${photo.is_featured ? 'bg-brand-maroon text-white' : 'bg-white/20 backdrop-blur-md text-white hover:bg-brand-maroon'}`}
+                              title="Set as Main Image"
+                            >
+                              <Star size={16} fill={photo.is_featured ? "currentColor" : "none"} />
+                            </button>
+                            <button 
+                              onClick={() => removePhoto(photo.id)}
+                              className="w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-maroon transition-colors"
+                              title="Remove from archive"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+        </motion.div>
       </div>
 
       {/* Upload Modal */}
@@ -656,6 +929,120 @@ export default function About() {
                   className="w-full bg-stone-900 text-white py-6 rounded-2xl font-bold tracking-[0.2em] uppercase text-[10px] hover:bg-brand-red transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl"
                 >
                   {newPhoto.category === "hero" ? "Save as Hero" : "Save to Archive"}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add / edit milestone modal */}
+      <AnimatePresence>
+        {isMilestoneFormOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeMilestoneForm}
+              className="absolute inset-0 bg-stone-900/70 backdrop-blur-md"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, y: 40, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 40, scale: 0.98 }}
+              transition={{ type: "spring", stiffness: 260, damping: 26 }}
+              className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-4 border-b border-brand-maroon/10 px-7 py-5 sm:px-8">
+                <h3 className="font-serif text-2xl text-brand-maroon sm:text-3xl">
+                  {editingMilestoneId ? "Edit Milestone" : "Add Milestone"}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeMilestoneForm}
+                  className="rounded-full border border-brand-maroon/15 bg-white p-2.5 text-brand-maroon transition hover:bg-brand-maroon hover:text-white"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={handleMilestoneSubmit} className="flex-1 space-y-6 overflow-y-auto px-7 py-7 sm:px-8">
+                <div className="grid gap-4 sm:grid-cols-[110px_1fr]">
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-[0.15em] text-brand-maroon/50">
+                      Year
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="2027"
+                      className="w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-base font-serif focus:border-brand-maroon focus:outline-none"
+                      value={milestoneForm.year}
+                      onChange={(e) => setMilestoneForm((prev) => ({ ...prev, year: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-[0.15em] text-brand-maroon/50">
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="A short headline for this year"
+                      className="w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-base font-serif focus:border-brand-maroon focus:outline-none"
+                      value={milestoneForm.title}
+                      onChange={(e) => setMilestoneForm((prev) => ({ ...prev, title: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-[0.15em] text-brand-maroon/50">
+                    Description
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="What happened this year?"
+                    className="w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 focus:border-brand-maroon focus:outline-none"
+                    value={milestoneForm.description}
+                    onChange={(e) => setMilestoneForm((prev) => ({ ...prev, description: e.target.value }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-[0.15em] text-brand-maroon/50">
+                    Icon
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {(Object.keys(MILESTONE_ICONS) as MilestoneIconKey[]).map((key) => {
+                      const Icon = MILESTONE_ICONS[key];
+                      const active = milestoneForm.iconKey === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setMilestoneForm((prev) => ({ ...prev, iconKey: key }))}
+                          className={`flex h-11 w-11 items-center justify-center rounded-2xl border transition ${
+                            active
+                              ? "border-brand-maroon bg-brand-maroon text-white"
+                              : "border-stone-200 bg-stone-50 text-brand-maroon/60 hover:border-brand-maroon/30"
+                          }`}
+                        >
+                          <Icon size={17} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-brand-maroon py-4 text-xs font-bold uppercase tracking-[0.3em] text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900"
+                >
+                  {editingMilestoneId ? "Update Milestone" : "Save Milestone"}
                 </button>
               </form>
             </motion.div>
