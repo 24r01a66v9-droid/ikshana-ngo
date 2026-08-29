@@ -1094,7 +1094,7 @@ export default function FoundersTeamPage() {
           <div className="mx-auto max-w-5xl text-center">
             <h1 className="font-serif text-[1.75rem] font-medium leading-tight tracking-[-0.03em] text-brand-maroon sm:text-4xl md:text-5xl lg:text-[3.5rem]">
               Our{" "}
-              <span className="relative inline-block">
+              <span className="relative inline-block italic">
                 Founders
                 <span
                   aria-hidden="true"
