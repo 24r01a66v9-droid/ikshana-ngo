@@ -42,7 +42,7 @@ export default function Footer() {
               </div>
             </div>
 
-            <p className="mt-3 max-w-2xl font-serif text-sm italic leading-[1.4] text-white/85 sm:mt-7 sm:text-xl sm:leading-8 lg:text-[1.45rem] lg:leading-10">
+            <p className="mt-5 max-w-2xl font-serif text-xl italic leading-8 text-white/85 sm:mt-7 sm:text-[1.35rem] sm:leading-9 lg:text-[1.45rem] lg:leading-10">
               Fostering compassionate leaders, creators, and change-makers who
               support those in need, spread awareness, and create a better
               tomorrow.
@@ -50,11 +50,11 @@ export default function Footer() {
           </section>
 
           <section>
-            <div className="mb-3 sm:mb-5">
-              <p className="text-[9px] font-bold uppercase tracking-[0.25em] text-white/75 sm:text-[10px] sm:tracking-[0.3em] lg:text-[11px]">
+            <div className="mb-4 sm:mb-6">
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/75 sm:text-xs sm:tracking-[0.3em] lg:text-sm">
                 Explore
               </p>
-              <h2 className="mt-1 font-serif text-lg italic text-white sm:text-2xl lg:text-3xl">
+              <h2 className="mt-1 font-serif text-2xl italic text-white sm:text-3xl lg:text-4xl">
                 Navigate
               </h2>
             </div>
@@ -94,11 +94,11 @@ export default function Footer() {
           </section>
 
           <section>
-            <div className="mb-3 sm:mb-5">
-              <p className="text-[9px] font-bold uppercase tracking-[0.25em] text-white/75 sm:text-[10px] sm:tracking-[0.3em] lg:text-[11px]">
+            <div className="mb-4 sm:mb-6">
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/75 sm:text-xs sm:tracking-[0.3em] lg:text-sm">
                 Reach Us
               </p>
-              <h2 className="mt-1 font-serif text-lg italic text-white sm:text-2xl lg:text-3xl">
+              <h2 className="mt-1 font-serif text-2xl italic text-white sm:text-3xl lg:text-4xl">
                 Contact
               </h2>
             </div>
@@ -111,37 +111,35 @@ export default function Footer() {
                 href="mailto:ikshana.4foundation@gmail.com"
                 className="group flex items-center gap-3 rounded-2xl border border-white/12 bg-white/[0.05] p-3 transition-all hover:border-white/25 hover:bg-white/[0.1] sm:rounded-xl sm:p-3.5"
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] transition-colors group-hover:bg-white group-hover:text-brand-maroon sm:h-9 sm:w-9">
-                  <Mail size={13} className="sm:hidden" />
-                  <Mail size={15} className="hidden sm:block" />
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] transition-colors group-hover:bg-white group-hover:text-brand-maroon">
+                  <Mail size={15} />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-[8px] font-bold uppercase tracking-[0.2em] text-white/40 sm:tracking-[0.22em]">
+                  <span className="block text-[8px] font-bold uppercase tracking-[0.22em] text-white/40">
                     Email
                   </span>
-                  <span className="mt-0.5 block break-all font-serif text-xs italic text-white/85 sm:text-base lg:text-lg">
+                  <span className="mt-0.5 block break-all font-serif text-base italic text-white/85 sm:text-lg">
                     ikshana.4foundation@gmail.com
                   </span>
                 </span>
               </a>
 
               <div className="flex items-center gap-3 rounded-2xl border border-white/12 bg-white/[0.05] p-3 sm:rounded-xl sm:border-white/10 sm:p-3.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] sm:h-9 sm:w-9">
-                  <MapPin size={13} className="sm:hidden" />
-                  <MapPin size={15} className="hidden sm:block" />
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06]">
+                  <MapPin size={15} />
                 </span>
                 <span>
-                  <span className="block text-[8px] font-bold uppercase tracking-[0.2em] text-white/40 sm:tracking-[0.22em]">
+                  <span className="block text-[8px] font-bold uppercase tracking-[0.22em] text-white/40">
                     Location
                   </span>
-                  <span className="mt-0.5 block font-serif text-xs italic text-white/85 sm:text-base lg:text-lg">
+                  <span className="mt-0.5 block font-serif text-base italic text-white/85 sm:text-lg">
                     Hyderabad, Telangana
                   </span>
                 </span>
               </div>
 
               <div className="pt-1 sm:pt-2 md:col-span-2 lg:col-span-1">
-                <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/65 sm:tracking-[0.28em]">
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/65 sm:text-xs sm:tracking-[0.28em]">
                   Follow Ikshana
                 </p>
 
