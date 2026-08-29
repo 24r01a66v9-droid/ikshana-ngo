@@ -12,7 +12,10 @@ import cookieParser from "cookie-parser";
 import { createClient } from "@supabase/supabase-js";
 import multer from "multer";
 import nodemailer from "nodemailer";
-import { createDevelopmentAdminAccount, shouldUseDevelopmentFallback } from "./src/auth/fallback";
+import {
+  createDevelopmentAdminAccount,
+  shouldUseDevelopmentFallback,
+} from "./src/auth/fallback";
 import { hashPassword, verifyPassword } from "./src/auth/password";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,12 +27,27 @@ const upload = multer({
   storage,
   // Removed fileSize limit to allow large uploads (admin-only uploads)
   fileFilter: (req, file, cb) => {
-    const allowedMimes = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/jpg", "image/x-png", "image/svg+xml"];
+    const allowedMimes = [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "image/jpg",
+      "image/x-png",
+      "image/svg+xml",
+    ];
     const normalizedMime = (file.mimetype || "").toLowerCase();
-    if (allowedMimes.includes(normalizedMime) || normalizedMime.startsWith("image/")) {
+    if (
+      allowedMimes.includes(normalizedMime) ||
+      normalizedMime.startsWith("image/")
+    ) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed."));
+      cb(
+        new Error(
+          "Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed."
+        )
+      );
     }
   },
 });
@@ -60,14 +78,24 @@ const sendPasswordResetEmail = async (toEmail: string, resetUrl: string) => {
   const transporter = createMailTransporter();
 
   if (!transporter) {
-    console.log(`[dev] SMTP not configured. Password reset link for ${toEmail}: ${resetUrl}`);
-    return { sent: false, resetUrl, reason: "SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not set in .env" };
+    console.log(
+      `[dev] SMTP not configured. Password reset link for ${toEmail}: ${resetUrl}`
+    );
+    return {
+      sent: false,
+      resetUrl,
+      reason:
+        "SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not set in .env",
+    };
   }
 
   try {
     // Set a timeout for email sending (5 seconds)
     const emailPromise = transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER || "no-reply@ikshana.local",
+      from:
+        process.env.SMTP_FROM ||
+        process.env.SMTP_USER ||
+        "no-reply@ikshana.local",
       to: toEmail,
       subject: "Reset your Ikshana password",
       html: `<p>Hello,</p><p>Use the link below to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
@@ -83,7 +111,12 @@ const sendPasswordResetEmail = async (toEmail: string, resetUrl: string) => {
   } catch (err: any) {
     console.error("Failed to send email via SMTP:", err?.message || err);
     // Still return the reset URL so user can proceed
-    return { sent: false, resetUrl, reason: "Email could not be sent, but you can use the reset link directly" };
+    return {
+      sent: false,
+      resetUrl,
+      reason:
+        "Email could not be sent, but you can use the reset link directly",
+    };
   }
 };
 
@@ -91,7 +124,10 @@ function normalizeEventRecord(event: any) {
   if (!event) return event;
   return {
     ...event,
-    activities: typeof event.activities === "string" ? JSON.parse(event.activities) : (event.activities || []),
+    activities:
+      typeof event.activities === "string"
+        ? JSON.parse(event.activities)
+        : event.activities || [],
   };
 }
 
@@ -104,16 +140,27 @@ const supabaseKey =
   process.env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("FATAL CONFIG ERROR: SUPABASE_URL and Supabase keys must be defined.");
+  console.error(
+    "FATAL CONFIG ERROR: SUPABASE_URL and Supabase keys must be defined."
+  );
   process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
-const isSecretKey = Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY);
-console.log(`Connected to Supabase using ${isSecretKey ? "Secret Key (RLS Bypassed)" : "Anon Key (Subject to RLS)"}.`);
+const isSecretKey = Boolean(
+  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+console.log(
+  `Connected to Supabase using ${
+    isSecretKey ? "Secret Key (RLS Bypassed)" : "Anon Key (Subject to RLS)"
+  }.`
+);
 
 // Helper: Upload file buffer to Supabase Storage with a local fallback
-async function uploadToSupabaseStorage(file: any, bucketName: string = "photos"): Promise<string> {
+async function uploadToSupabaseStorage(
+  file: any,
+  bucketName: string = "photos"
+): Promise<string> {
   const fileExt = path.extname(file.originalname);
   const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
   const fileName = `img-${uniqueSuffix}${fileExt}`;
@@ -130,13 +177,16 @@ async function uploadToSupabaseStorage(file: any, bucketName: string = "photos")
       throw error;
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucketName)
-      .getPublicUrl(fileName);
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(bucketName).getPublicUrl(fileName);
 
     return publicUrl;
   } catch (error: any) {
-    console.error("Supabase Storage Upload Error, using local fallback:", error);
+    console.error(
+      "Supabase Storage Upload Error, using local fallback:",
+      error
+    );
 
     const uploadsDir = path.join(__dirname, "uploads");
     await fs.promises.mkdir(uploadsDir, { recursive: true });
@@ -163,7 +213,11 @@ async function appendLocalPhotoManifest(record: any) {
 
     record.created_at = record.created_at || new Date().toISOString();
     manifest.unshift(record);
-    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    await fs.promises.writeFile(
+      manifestPath,
+      JSON.stringify(manifest, null, 2),
+      "utf8"
+    );
     console.log("[DEBUG] Appended local photo manifest entry:", record.url);
   } catch (e) {
     console.error("[DEBUG] Failed to append local photo manifest:", e);
@@ -171,15 +225,18 @@ async function appendLocalPhotoManifest(record: any) {
 }
 
 // Helper: Delete file from Supabase Storage by its public URL
-async function deleteFromSupabaseStorage(url: string, bucketName: string = "photos"): Promise<void> {
+async function deleteFromSupabaseStorage(
+  url: string,
+  bucketName: string = "photos"
+): Promise<void> {
   try {
     const parts = url.split("/");
     const fileName = parts[parts.length - 1];
-    
+
     const { error } = await supabase.storage
       .from(bucketName)
       .remove([fileName]);
-    
+
     if (error) {
       console.error("Supabase Storage Delete Error:", error);
     }
@@ -200,7 +257,9 @@ async function startServer() {
         if (error.code === "EADDRINUSE" && port < 3010) {
           console.warn(`Port ${port} is busy, trying ${port + 1}...`);
           server.close(() => {
-            listenWithFallback(port + 1).then(resolve).catch(reject);
+            listenWithFallback(port + 1)
+              .then(resolve)
+              .catch(reject);
           });
         } else {
           reject(error);
@@ -209,28 +268,39 @@ async function startServer() {
     });
   };
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
 
   // CORS middleware: allow local frontend during development and handle preflight
-  const allowedOrigins = [process.env.FRONTEND_URL || 'http://localhost:3000', 'http://127.0.0.1:3000'];
+  const allowedOrigins = [
+    process.env.FRONTEND_URL || "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ];
   app.use((req: any, res: any, next: any) => {
-    const origin = req.get('origin');
+    const origin = req.get("origin");
     if (!origin) {
       // non-browser requests (curl, server-side) - allow
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader("Access-Control-Allow-Origin", "*");
     } else if (allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader("Access-Control-Allow-Origin", origin);
     }
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Ikshana-Token');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Ikshana-Token"
+    );
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    );
+    if (req.method === "OPTIONS") return res.sendStatus(200);
     next();
   });
 
-  const developmentAdminAccount = shouldUseDevelopmentFallback({ NODE_ENV: process.env.NODE_ENV })
+  const developmentAdminAccount = shouldUseDevelopmentFallback({
+    NODE_ENV: process.env.NODE_ENV,
+  })
     ? await createDevelopmentAdminAccount({
         NODE_ENV: process.env.NODE_ENV,
         DEFAULT_ADMIN_EMAIL: process.env.DEFAULT_ADMIN_EMAIL,
@@ -245,8 +315,8 @@ async function startServer() {
   // Health check for deployment platforms
   app.get("/health", (req, res) => res.status(200).send("ok"));
 
-  app.get('/favicon.ico', (req, res) => {
-    res.type('image/x-icon').send('');
+  app.get("/favicon.ico", (req, res) => {
+    res.type("image/x-icon").send("");
   });
 
   // Auth Middleware
@@ -254,7 +324,9 @@ async function startServer() {
     const cookieToken = req.cookies?.token || "";
     const authHeader = req.headers.authorization || "";
     const fallbackHeaderToken = req.headers["x-ikshana-token"] || "";
-    const headerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const headerToken = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : "";
     const token = cookieToken || headerToken || fallbackHeaderToken;
 
     if (!token) {
@@ -294,7 +366,9 @@ async function startServer() {
     const cookieToken = req.cookies.token;
     const authHeader = req.headers.authorization || "";
     const fallbackHeaderToken = req.headers["x-ikshana-token"] || "";
-    const headerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const headerToken = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : "";
     const token = cookieToken || headerToken || fallbackHeaderToken;
 
     if (!token) {
@@ -323,15 +397,23 @@ async function startServer() {
 
     try {
       const hashedPassword = await hashPassword(password);
-      const role = cleanEmail === "24r01a66v9@cmrithyderabad.edu.in" ? "admin" : "user";
-      
+      const role =
+        cleanEmail === "24r01a66v9@cmrithyderabad.edu.in" ? "admin" : "user";
+
       const { data, error } = await supabase
         .from("users")
-        .insert([{ name: String(name).trim(), email: cleanEmail, password: hashedPassword, role }])
+        .insert([
+          {
+            name: String(name).trim(),
+            email: cleanEmail,
+            password: hashedPassword,
+            role,
+          },
+        ])
         .select();
 
       if (error) {
-        if (error.code === '23505') {
+        if (error.code === "23505") {
           return res.status(400).json({ error: "Email already exists" });
         }
         throw error;
@@ -344,29 +426,55 @@ async function startServer() {
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    const email = String(req.body?.email || "").trim().toLowerCase();
+    const email = String(req.body?.email || "")
+      .trim()
+      .toLowerCase();
     const password = String(req.body?.password || "");
 
     try {
       // If development fallback is enabled and the requested email is one of the fallback emails,
       // authenticate using the local development admin account without calling Supabase (avoids DNS errors).
       if (developmentAdminAccount) {
-        const normalizedFallbackEmails = developmentAdminAccount.emails.map((candidate) => candidate.toLowerCase());
+        const normalizedFallbackEmails = developmentAdminAccount.emails.map(
+          (candidate) => candidate.toLowerCase()
+        );
         if (normalizedFallbackEmails.includes(email)) {
-          const validPassword = password === developmentAdminAccount.password || (await bcrypt.compare(password, developmentAdminAccount.passwordHash));
+          const validPassword =
+            password === developmentAdminAccount.password ||
+            (await bcrypt.compare(
+              password,
+              developmentAdminAccount.passwordHash
+            ));
           if (!validPassword) {
             return res.status(401).json({ error: "Invalid credentials" });
           }
 
-          const fallbackEmail = developmentAdminAccount.emails.find((candidate) => candidate.toLowerCase() === email) || developmentAdminAccount.emails[0];
+          const fallbackEmail =
+            developmentAdminAccount.emails.find(
+              (candidate) => candidate.toLowerCase() === email
+            ) || developmentAdminAccount.emails[0];
           const token = jwt.sign(
-            { id: 0, name: developmentAdminAccount.name, email: fallbackEmail, role: developmentAdminAccount.role },
+            {
+              id: 0,
+              name: developmentAdminAccount.name,
+              email: fallbackEmail,
+              role: developmentAdminAccount.role,
+            },
             JWT_SECRET,
             { expiresIn: "24h" }
           );
-          res.cookie("token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict" });
+          res.cookie("token", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+          });
           return res.json({
-            user: { id: 0, name: developmentAdminAccount.name, email: fallbackEmail, role: developmentAdminAccount.role },
+            user: {
+              id: 0,
+              name: developmentAdminAccount.name,
+              email: fallbackEmail,
+              role: developmentAdminAccount.role,
+            },
             token,
           });
         }
@@ -386,11 +494,25 @@ async function startServer() {
       }
 
       // Force admin role for the specific email
-      const role = user.email.toLowerCase() === "24r01a66v9@cmrithyderabad.edu.in" ? "admin" : user.role;
+      const role =
+        user.email.toLowerCase() === "24r01a66v9@cmrithyderabad.edu.in"
+          ? "admin"
+          : user.role;
 
-      const token = jwt.sign({ id: user.id, name: user.name, email: user.email, role: role }, JWT_SECRET, { expiresIn: "24h" });
-      res.cookie("token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict" });
-      res.json({ user: { id: user.id, name: user.name, email: user.email, role: role }, token });
+      const token = jwt.sign(
+        { id: user.id, name: user.name, email: user.email, role: role },
+        JWT_SECRET,
+        { expiresIn: "24h" }
+      );
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+      });
+      res.json({
+        user: { id: user.id, name: user.name, email: user.email, role: role },
+        token,
+      });
     } catch (error) {
       console.error("Login failed:", error);
       res.status(500).json({ error: "Login failed" });
@@ -403,7 +525,9 @@ async function startServer() {
   });
 
   app.post("/api/auth/forgot-password", async (req, res) => {
-    const email = String(req.body?.email || "").trim().toLowerCase();
+    const email = String(req.body?.email || "")
+      .trim()
+      .toLowerCase();
     if (!email) {
       return res.status(400).json({ error: "Email is required" });
     }
@@ -412,14 +536,20 @@ async function startServer() {
       let userId: number | null = null;
       let targetEmail = email;
 
-      const { data: user, error } = await supabase.from("users").select("id, email").ilike("email", email).maybeSingle();
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("id, email")
+        .ilike("email", email)
+        .maybeSingle();
       if (error) throw error;
 
       if (user) {
         userId = user.id;
         targetEmail = user.email;
       } else if (developmentAdminAccount) {
-        const normalizedFallback = developmentAdminAccount.emails.map((e) => e.toLowerCase());
+        const normalizedFallback = developmentAdminAccount.emails.map((e) =>
+          e.toLowerCase()
+        );
         if (normalizedFallback.includes(email)) {
           userId = 0;
           targetEmail = email;
@@ -427,18 +557,34 @@ async function startServer() {
       }
 
       if (userId === null) {
-        return res.json({ success: true, message: "If an account exists for that email, a reset link has been sent." });
+        return res.json({
+          success: true,
+          message:
+            "If an account exists for that email, a reset link has been sent.",
+        });
       }
 
-      const resetToken = jwt.sign({ id: userId, email: targetEmail, purpose: "password-reset" }, JWT_SECRET, { expiresIn: "1h" });
-      
-      const reqOrigin = req.get("origin") || (req.get("referer") ? new URL(req.get("referer")!).origin : null);
+      const resetToken = jwt.sign(
+        { id: userId, email: targetEmail, purpose: "password-reset" },
+        JWT_SECRET,
+        { expiresIn: "1h" }
+      );
+
+      const reqOrigin =
+        req.get("origin") ||
+        (req.get("referer") ? new URL(req.get("referer")!).origin : null);
       const host = req.get("host") || "localhost:3000";
       const protocol = req.protocol || "http";
-      const baseUrl = process.env.FRONTEND_URL || process.env.APP_URL || reqOrigin || `${protocol}://${host}`;
+      const baseUrl =
+        process.env.FRONTEND_URL ||
+        process.env.APP_URL ||
+        reqOrigin ||
+        `${protocol}://${host}`;
 
-      const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
-      
+      const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(
+        resetToken
+      )}`;
+
       // Send email with timeout, but don't wait for it to complete
       const mailResult = await Promise.race([
         sendPasswordResetEmail(targetEmail, resetUrl),
@@ -458,7 +604,9 @@ async function startServer() {
       });
     } catch (error) {
       console.error("Forgot password failed:", error);
-      return res.status(500).json({ error: "Unable to process password reset" });
+      return res
+        .status(500)
+        .json({ error: "Unable to process password reset" });
     }
   });
 
@@ -470,25 +618,43 @@ async function startServer() {
     }
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as { id?: number; email?: string; purpose?: string };
+      const decoded = jwt.verify(token, JWT_SECRET) as {
+        id?: number;
+        email?: string;
+        purpose?: string;
+      };
       if (decoded?.purpose !== "password-reset" || !decoded?.email) {
         return res.status(400).json({ error: "Invalid reset token" });
       }
 
       // Check if user is admin
-      const { data: user, error } = await supabase.from("users").select("role").ilike("email", decoded.email).maybeSingle();
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("role")
+        .ilike("email", decoded.email)
+        .maybeSingle();
       if (error) throw error;
 
       if (user) {
         return res.json({ isAdmin: user.role === "admin" });
-      } else if (developmentAdminAccount && developmentAdminAccount.emails.map(e => e.toLowerCase()).includes(decoded.email.toLowerCase())) {
+      } else if (
+        developmentAdminAccount &&
+        developmentAdminAccount.emails
+          .map((e) => e.toLowerCase())
+          .includes(decoded.email.toLowerCase())
+      ) {
         return res.json({ isAdmin: true });
       } else {
         return res.json({ isAdmin: false });
       }
     } catch (error: any) {
-      if (error?.name === "TokenExpiredError" || error?.name === "JsonWebTokenError") {
-        return res.status(400).json({ error: "Invalid or expired reset token" });
+      if (
+        error?.name === "TokenExpiredError" ||
+        error?.name === "JsonWebTokenError"
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Invalid or expired reset token" });
       }
 
       console.error("Check reset user failed:", error);
@@ -500,15 +666,23 @@ async function startServer() {
     const { token, newPassword } = req.body || {};
 
     if (!token || !newPassword) {
-      return res.status(400).json({ error: "Reset token and new password are required" });
+      return res
+        .status(400)
+        .json({ error: "Reset token and new password are required" });
     }
 
     if (String(newPassword).length < 6) {
-      return res.status(400).json({ error: "New password must be at least 6 characters long" });
+      return res
+        .status(400)
+        .json({ error: "New password must be at least 6 characters long" });
     }
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as { id?: number; email?: string; purpose?: string };
+      const decoded = jwt.verify(token, JWT_SECRET) as {
+        id?: number;
+        email?: string;
+        purpose?: string;
+      };
       if (decoded?.purpose !== "password-reset" || !decoded?.email) {
         return res.status(400).json({ error: "Invalid reset token" });
       }
@@ -516,28 +690,55 @@ async function startServer() {
       const hashedPassword = await hashPassword(String(newPassword));
 
       // Try finding user in Supabase
-      const { data: user, error } = await supabase.from("users").select("id, email").ilike("email", decoded.email).maybeSingle();
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("id, email")
+        .ilike("email", decoded.email)
+        .maybeSingle();
       if (error) throw error;
 
       if (user) {
-        const { error: updateError } = await supabase.from("users").update({ password: hashedPassword }).eq("id", user.id);
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({ password: hashedPassword })
+          .eq("id", user.id);
         if (updateError) throw updateError;
-      } else if (developmentAdminAccount && developmentAdminAccount.emails.map(e => e.toLowerCase()).includes(decoded.email.toLowerCase())) {
+      } else if (
+        developmentAdminAccount &&
+        developmentAdminAccount.emails
+          .map((e) => e.toLowerCase())
+          .includes(decoded.email.toLowerCase())
+      ) {
         developmentAdminAccount.password = String(newPassword);
         developmentAdminAccount.passwordHash = hashedPassword;
 
         // Upsert into Supabase users table so future lookups work
-        await supabase.from("users").upsert([
-          { name: developmentAdminAccount.name, email: decoded.email.toLowerCase(), password: hashedPassword, role: developmentAdminAccount.role }
-        ], { onConflict: "email" });
+        await supabase
+          .from("users")
+          .upsert(
+            [
+              {
+                name: developmentAdminAccount.name,
+                email: decoded.email.toLowerCase(),
+                password: hashedPassword,
+                role: developmentAdminAccount.role,
+              },
+            ],
+            { onConflict: "email" }
+          );
       } else {
         return res.status(404).json({ error: "User not found" });
       }
 
       return res.json({ success: true, message: "Password reset successful" });
     } catch (error: any) {
-      if (error?.name === "TokenExpiredError" || error?.name === "JsonWebTokenError") {
-        return res.status(400).json({ error: "Invalid or expired reset token" });
+      if (
+        error?.name === "TokenExpiredError" ||
+        error?.name === "JsonWebTokenError"
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Invalid or expired reset token" });
       }
 
       console.error("Reset password failed:", error);
@@ -545,50 +746,82 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/change-password", authenticateToken, async (req: any, res) => {
-    const { currentPassword, newPassword } = req.body || {};
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: "Current and new password are required" });
-    }
+  app.post(
+    "/api/auth/change-password",
+    authenticateToken,
+    async (req: any, res) => {
+      const { currentPassword, newPassword } = req.body || {};
+      if (!currentPassword || !newPassword) {
+        return res
+          .status(400)
+          .json({ error: "Current and new password are required" });
+      }
 
-    if (String(newPassword).length < 6) {
-      return res.status(400).json({ error: "New password must be at least 6 characters long" });
-    }
+      if (String(newPassword).length < 6) {
+        return res
+          .status(400)
+          .json({ error: "New password must be at least 6 characters long" });
+      }
 
-    try {
-      const normalizedEmail = String(req.user?.email || "").trim().toLowerCase();
-      const isDevelopmentAdmin = developmentAdminAccount && normalizedEmail && developmentAdminAccount.emails.map((candidate) => candidate.toLowerCase()).includes(normalizedEmail);
+      try {
+        const normalizedEmail = String(req.user?.email || "")
+          .trim()
+          .toLowerCase();
+        const isDevelopmentAdmin =
+          developmentAdminAccount &&
+          normalizedEmail &&
+          developmentAdminAccount.emails
+            .map((candidate) => candidate.toLowerCase())
+            .includes(normalizedEmail);
 
-      if (isDevelopmentAdmin) {
-        const current = String(currentPassword || "");
-        const expected = String(developmentAdminAccount.password || "");
-        if (current !== expected) {
-          return res.status(401).json({ error: "Current password is incorrect" });
+        if (isDevelopmentAdmin) {
+          const current = String(currentPassword || "");
+          const expected = String(developmentAdminAccount.password || "");
+          if (current !== expected) {
+            return res
+              .status(401)
+              .json({ error: "Current password is incorrect" });
+          }
+          return res.json({
+            success: true,
+            message: "Password updated for development admin account",
+          });
         }
-        return res.json({ success: true, message: "Password updated for development admin account" });
+
+        const { data: user, error } = await supabase
+          .from("users")
+          .select("*")
+          .eq("email", req.user.email)
+          .maybeSingle();
+        if (error) throw error;
+
+        if (!user) {
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        if (
+          !user.password ||
+          !(await verifyPassword(currentPassword, user.password))
+        ) {
+          return res
+            .status(401)
+            .json({ error: "Current password is incorrect" });
+        }
+
+        const hashedPassword = await hashPassword(newPassword);
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({ password: hashedPassword })
+          .eq("id", user.id);
+        if (updateError) throw updateError;
+
+        return res.json({ success: true });
+      } catch (error) {
+        console.error("Change password failed:", error);
+        return res.status(500).json({ error: "Unable to change password" });
       }
-
-      const { data: user, error } = await supabase.from("users").select("*" ).eq("email", req.user.email).maybeSingle();
-      if (error) throw error;
-
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      if (!user.password || !(await verifyPassword(currentPassword, user.password))) {
-        return res.status(401).json({ error: "Current password is incorrect" });
-      }
-
-      const hashedPassword = await hashPassword(newPassword);
-      const { error: updateError } = await supabase.from("users").update({ password: hashedPassword }).eq("id", user.id);
-      if (updateError) throw updateError;
-
-      return res.json({ success: true });
-    } catch (error) {
-      console.error("Change password failed:", error);
-      return res.status(500).json({ error: "Unable to change password" });
     }
-  });
+  );
 
   app.get("/api/auth/me", authenticateOptionalToken, (req: any, res) => {
     if (!req.user) {
@@ -600,7 +833,10 @@ async function startServer() {
   // Events API
   app.get("/api/events", async (req, res) => {
     try {
-      const { data, error } = await supabase.from("events").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("events")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json((data || []).map(normalizeEventRecord));
     } catch (error: any) {
@@ -622,13 +858,23 @@ async function startServer() {
   });
 
   app.post("/api/events", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
 
-    const { title, date, occasion, description, acknowledgments, activities, image } = req.body;
+    const {
+      title,
+      date,
+      occasion,
+      description,
+      acknowledgments,
+      activities,
+      image,
+    } = req.body;
     if (!title || !date || !description) {
-      return res.status(400).json({ error: "Title, date, and description are required" });
+      return res
+        .status(400)
+        .json({ error: "Title, date, and description are required" });
     }
 
     try {
@@ -639,58 +885,109 @@ async function startServer() {
         description,
       };
 
-      if (acknowledgments !== undefined) insertPayload.acknowledgments = acknowledgments || null;
-      if (activities !== undefined) insertPayload.activities = Array.isArray(activities) ? activities : [];
+      if (acknowledgments !== undefined)
+        insertPayload.acknowledgments = acknowledgments || null;
+      if (activities !== undefined)
+        insertPayload.activities = Array.isArray(activities) ? activities : [];
       if (image !== undefined) insertPayload.image = image || null;
 
-      const { data, error } = await supabase.from("events").insert([insertPayload]).select();
+      const { data, error } = await supabase
+        .from("events")
+        .insert([insertPayload])
+        .select();
 
       if (error) throw error;
-      return res.json({ success: true, event: normalizeEventRecord(data?.[0]) });
+      return res.json({
+        success: true,
+        event: normalizeEventRecord(data?.[0]),
+      });
     } catch (error: any) {
       console.error("Supabase add event error:", error);
-      if (error?.message?.includes("acknowledgments") || error?.message?.includes("column") || error?.message?.includes("schema cache")) {
-        return res.status(500).json({ error: "Your Supabase events table is missing one or more required columns. Please create the table first." });
+      if (
+        error?.message?.includes("acknowledgments") ||
+        error?.message?.includes("column") ||
+        error?.message?.includes("schema cache")
+      ) {
+        return res
+          .status(500)
+          .json({
+            error:
+              "Your Supabase events table is missing one or more required columns. Please create the table first.",
+          });
       }
       res.status(500).json({ error: error.message || "Failed to add event" });
     }
   });
 
   app.patch("/api/events/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
 
     const { id } = req.params;
-    const { title, date, occasion, description, acknowledgments, activities, image } = req.body;
+    const {
+      title,
+      date,
+      occasion,
+      description,
+      acknowledgments,
+      activities,
+      image,
+    } = req.body;
 
     try {
-      const { data, error } = await supabase.from("events").update({
-        title,
-        date,
-        occasion,
-        description,
-        acknowledgments,
-        activities: Array.isArray(activities) ? activities : [],
-        image,
-      }).eq("id", id).select();
+      const { data, error } = await supabase
+        .from("events")
+        .update({
+          title,
+          date,
+          occasion,
+          description,
+          acknowledgments,
+          activities: Array.isArray(activities) ? activities : [],
+          image,
+        })
+        .eq("id", id)
+        .select();
 
       if (error) throw error;
-      return res.json({ success: true, event: normalizeEventRecord(data?.[0]) });
+      return res.json({
+        success: true,
+        event: normalizeEventRecord(data?.[0]),
+      });
     } catch (error: any) {
       console.error("Supabase update event error:", error);
       // If Supabase is unreachable in development, return success so client can continue with optimistic update
       const errText = JSON.stringify(error || {}) || String(error || "");
-      if (errText.toLowerCase().includes("getaddrinfo") || errText.toLowerCase().includes("enotfound") || errText.toLowerCase().includes("fetch failed")) {
-        console.warn("Supabase unreachable — returning optimistic success for PATCH /api/events/:id");
-        return res.json({ success: true, event: { id, title, date, occasion, description, acknowledgments, activities } });
+      if (
+        errText.toLowerCase().includes("getaddrinfo") ||
+        errText.toLowerCase().includes("enotfound") ||
+        errText.toLowerCase().includes("fetch failed")
+      ) {
+        console.warn(
+          "Supabase unreachable — returning optimistic success for PATCH /api/events/:id"
+        );
+        return res.json({
+          success: true,
+          event: {
+            id,
+            title,
+            date,
+            occasion,
+            description,
+            acknowledgments,
+            activities,
+          },
+        });
       }
-      res.status(500).json({ error: error.message || "Failed to update event" });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to update event" });
     }
   });
 
   app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -703,11 +1000,19 @@ async function startServer() {
       console.error("Supabase delete event error:", error);
       // If Supabase is unreachable in development, return success so client can proceed with optimistic delete
       const errText = JSON.stringify(error || {}) || String(error || "");
-      if (errText.toLowerCase().includes("getaddrinfo") || errText.toLowerCase().includes("enotfound") || errText.toLowerCase().includes("fetch failed")) {
-        console.warn("Supabase unreachable — returning optimistic success for DELETE /api/events/:id");
+      if (
+        errText.toLowerCase().includes("getaddrinfo") ||
+        errText.toLowerCase().includes("enotfound") ||
+        errText.toLowerCase().includes("fetch failed")
+      ) {
+        console.warn(
+          "Supabase unreachable — returning optimistic success for DELETE /api/events/:id"
+        );
         return res.json({ success: true });
       }
-      res.status(500).json({ error: error.message || "Failed to delete event" });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to delete event" });
     }
   });
 
@@ -734,7 +1039,9 @@ async function startServer() {
 
       if (error) throw error;
 
-      console.log(`[DEBUG] GET /api/photos returned ${data?.length || 0} record(s)`);
+      console.log(
+        `[DEBUG] GET /api/photos returned ${data?.length || 0} record(s)`
+      );
       return res.json(data || []);
     } catch (error: any) {
       console.error(
@@ -828,15 +1135,21 @@ async function startServer() {
               }
             : {}
         );
-        console.log("[DEBUG] POST /api/photos file present:", !!req.file, req.file
-          ? {
-              originalname: req.file.originalname,
-              size: req.file.size,
-              mimetype: req.file.mimetype,
-            }
-          : null);
+        console.log(
+          "[DEBUG] POST /api/photos file present:",
+          !!req.file,
+          req.file
+            ? {
+                originalname: req.file.originalname,
+                size: req.file.size,
+                mimetype: req.file.mimetype,
+              }
+            : null
+        );
 
-        const email = String(req.user?.email || "").trim().toLowerCase();
+        const email = String(req.user?.email || "")
+          .trim()
+          .toLowerCase();
         const isAuthorized =
           req.user?.role === "admin" ||
           email === "24r01a66v9@cmrithyderabad.edu.in" ||
@@ -921,7 +1234,9 @@ async function startServer() {
           // Without these two fields the frontend cannot tell a 5-photo
           // memory apart from 5 separate single-photo memories.
           group_id: group_id || null,
-          photo_order: Number.isFinite(numericPhotoOrder) ? numericPhotoOrder : 0,
+          photo_order: Number.isFinite(numericPhotoOrder)
+            ? numericPhotoOrder
+            : 0,
         };
 
         console.log("[DEBUG] Inserting photo metadata:", insertPayload);
@@ -940,7 +1255,8 @@ async function startServer() {
           // obvious a migration is needed, rather than looking like a
           // one-off upload failure.
           const missingColumn =
-            error?.message?.includes("group_id") || error?.message?.includes("photo_order");
+            error?.message?.includes("group_id") ||
+            error?.message?.includes("photo_order");
           if (missingColumn) {
             return res.status(500).json({
               error:
@@ -994,10 +1310,7 @@ async function startServer() {
         await deleteFromSupabaseStorage(photoData.url, "photos");
       }
 
-      const { error } = await supabase
-        .from("photos")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("photos").delete().eq("id", id);
 
       if (error) throw error;
 
@@ -1009,7 +1322,8 @@ async function startServer() {
         error?.stack || error?.message || error
       );
       return res.status(500).json({
-        error: error?.message || "Failed to delete photo from storage or database",
+        error:
+          error?.message || "Failed to delete photo from storage or database",
       });
     }
   });
@@ -1021,7 +1335,9 @@ async function startServer() {
     authenticateOptionalToken,
     upload.single("file"),
     async (req: any, res) => {
-      const email = String(req.user?.email || "").trim().toLowerCase();
+      const email = String(req.user?.email || "")
+        .trim()
+        .toLowerCase();
       const isAuthorized =
         req.user?.role === "admin" ||
         email === "24r01a66v9@cmrithyderabad.edu.in" ||
@@ -1103,9 +1419,7 @@ async function startServer() {
           if (
             existingPhoto?.url &&
             existingPhoto.url !== newFileUrl &&
-            String(existingPhoto.url).includes(
-              "/storage/v1/object/public/"
-            )
+            String(existingPhoto.url).includes("/storage/v1/object/public/")
           ) {
             await deleteFromSupabaseStorage(existingPhoto.url, "photos");
           }
@@ -1131,7 +1445,8 @@ async function startServer() {
 
         if (error) {
           const missingColumn =
-            error?.message?.includes("group_id") || error?.message?.includes("photo_order");
+            error?.message?.includes("group_id") ||
+            error?.message?.includes("photo_order");
           if (missingColumn) {
             return res.status(500).json({
               error:
@@ -1160,38 +1475,42 @@ async function startServer() {
     }
   );
 
-  app.patch("/api/photos/:id/feature", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ error: "Admin access required" });
+  app.patch(
+    "/api/photos/:id/feature",
+    authenticateToken,
+    async (req: any, res) => {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { id } = req.params;
+      const { category } = req.body;
+
+      try {
+        const { error: resetError } = await supabase
+          .from("photos")
+          .update({ is_featured: 0 })
+          .eq("category", category);
+
+        if (resetError) throw resetError;
+
+        const { data, error } = await supabase
+          .from("photos")
+          .update({ is_featured: 1 })
+          .eq("id", id)
+          .select();
+
+        if (error) throw error;
+
+        return res.json({ success: true, photo: data?.[0] });
+      } catch (error: any) {
+        console.error("Supabase feature photo error:", error);
+        return res.status(500).json({
+          error: error?.message || "Failed to feature photo",
+        });
+      }
     }
-
-    const { id } = req.params;
-    const { category } = req.body;
-
-    try {
-      const { error: resetError } = await supabase
-        .from("photos")
-        .update({ is_featured: 0 })
-        .eq("category", category);
-
-      if (resetError) throw resetError;
-
-      const { data, error } = await supabase
-        .from("photos")
-        .update({ is_featured: 1 })
-        .eq("id", id)
-        .select();
-
-      if (error) throw error;
-
-      return res.json({ success: true, photo: data?.[0] });
-    } catch (error: any) {
-      console.error("Supabase feature photo error:", error);
-      return res.status(500).json({
-        error: error?.message || "Failed to feature photo",
-      });
-    }
-  });
+  );
 
   // Reorder photos in gallery
   app.post("/api/photos/reorder", authenticateToken, async (req: any, res) => {
@@ -1260,6 +1579,161 @@ async function startServer() {
     }
   });
 
+  /* ------------------------------------------------------------------ */
+  /*  MILESTONES API                                                     */
+  /*  Insert this block into server.ts, right after the "// Photos API"  */
+  /*  block ends (i.e. right before "// Leadership Members API").        */
+  /*                                                                     */
+  /*  It expects a Supabase table called `milestones` — see              */
+  /*  milestones-table.sql for the exact schema to run in Supabase.      */
+  /*                                                                     */
+  /*  DB column names are snake_case (icon_key), the frontend uses       */
+  /*  camelCase (iconKey) — the two small helpers below convert between  */
+  /*  them so About.tsx doesn't need to change its payload shape.        */
+  /* ------------------------------------------------------------------ */
+
+  function toMilestoneRow(payload: any) {
+    return {
+      year: payload.year,
+      title: payload.title,
+      description: payload.description ?? "",
+      icon_key: payload.iconKey || "sprout",
+    };
+  }
+
+  function fromMilestoneRow(row: any) {
+    if (!row) return row;
+    return {
+      id: row.id,
+      year: row.year,
+      title: row.title,
+      description: row.description,
+      iconKey: row.icon_key,
+    };
+  }
+
+  app.get("/api/milestones", async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from("milestones")
+        .select("*")
+        .order("year", { ascending: true });
+
+      if (error) throw error;
+      return res.json((data || []).map(fromMilestoneRow));
+    } catch (error: any) {
+      console.error("Supabase fetch milestones error:", error);
+      // Table not created yet, or DB unreachable in local dev — return an
+      // empty list so the frontend quietly falls back to its local/default
+      // milestones instead of surfacing a 500.
+      const errText = JSON.stringify(error || {}) || String(error || "");
+      if (
+        error?.message?.includes("relation") ||
+        error?.message?.includes("does not exist") ||
+        error?.message?.includes("schema cache") ||
+        errText.toLowerCase().includes("getaddrinfo") ||
+        errText.toLowerCase().includes("enotfound") ||
+        errText.toLowerCase().includes("fetch failed")
+      ) {
+        return res.json([]);
+      }
+      res.status(500).json({ error: "Failed to fetch milestones" });
+    }
+  });
+
+  app.post("/api/milestones", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { year, title, description, iconKey } = req.body || {};
+    if (!year || !title) {
+      return res.status(400).json({ error: "Year and title are required" });
+    }
+
+    try {
+      const id = `m-${Date.now()}`;
+      const insertPayload = {
+        id,
+        ...toMilestoneRow({ year, title, description, iconKey }),
+      };
+
+      const { data, error } = await supabase
+        .from("milestones")
+        .insert([insertPayload])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res
+        .status(201)
+        .json({ success: true, milestone: fromMilestoneRow(data) });
+    } catch (error: any) {
+      console.error("Supabase add milestone error:", error);
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to add milestone" });
+    }
+  });
+
+  app.patch("/api/milestones/:id", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { id } = req.params;
+    const { year, title, description, iconKey } = req.body || {};
+
+    try {
+      const updatePayload: Record<string, any> = {};
+      if (year !== undefined) updatePayload.year = year;
+      if (title !== undefined) updatePayload.title = title;
+      if (description !== undefined) updatePayload.description = description;
+      if (iconKey !== undefined) updatePayload.icon_key = iconKey;
+      updatePayload.updated_at = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from("milestones")
+        .update(updatePayload)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.json({ success: true, milestone: fromMilestoneRow(data) });
+    } catch (error: any) {
+      console.error("Supabase update milestone error:", error);
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to update milestone" });
+    }
+  });
+
+  app.delete(
+    "/api/milestones/:id",
+    authenticateToken,
+    async (req: any, res) => {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { id } = req.params;
+      try {
+        const { error } = await supabase
+          .from("milestones")
+          .delete()
+          .eq("id", id);
+        if (error) throw error;
+        return res.json({ success: true });
+      } catch (error: any) {
+        console.error("Supabase delete milestone error:", error);
+        res
+          .status(500)
+          .json({ error: error.message || "Failed to delete milestone" });
+      }
+    }
+  );
+
   // Leadership Members API
   app.get("/api/leadership-members", async (req, res) => {
     try {
@@ -1273,151 +1747,226 @@ async function startServer() {
       return res.json(data || []);
     } catch (error: any) {
       console.error("Supabase fetch leadership members error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch leadership members" });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch leadership members" });
     }
   });
 
-  app.post("/api/leadership-members", authenticateOptionalToken, upload.single("file"), async (req: any, res) => {
-    const email = String(req.user?.email || "").trim().toLowerCase();
-    const isAuthorized =
-      req.user?.role === "admin" ||
-      email === "24r01a66v9@cmrithyderabad.edu.in" ||
-      email === "admin@ikshana.local" ||
-      process.env.NODE_ENV !== "production";
+  app.post(
+    "/api/leadership-members",
+    authenticateOptionalToken,
+    upload.single("file"),
+    async (req: any, res) => {
+      const email = String(req.user?.email || "")
+        .trim()
+        .toLowerCase();
+      const isAuthorized =
+        req.user?.role === "admin" ||
+        email === "24r01a66v9@cmrithyderabad.edu.in" ||
+        email === "admin@ikshana.local" ||
+        process.env.NODE_ENV !== "production";
 
-    if (!isAuthorized) {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-
-    const { name, role, tenure, bio, category, display_order, linkedin_url, instagram_url, image } = req.body;
-
-    if (!name || !role) {
-      return res.status(400).json({ error: "Name and role are required" });
-    }
-
-    try {
-      let imageUrl = image || "";
-      if (req.file) {
-        imageUrl = await uploadToSupabaseStorage(req.file, "photos");
+      if (!isAuthorized) {
+        return res.status(403).json({ error: "Admin access required" });
       }
 
-      const payload = {
-        name: name.trim(),
-        role: role.trim(),
-        tenure: tenure ? tenure.trim() : "2026",
-        bio: typeof bio === "string" ? bio.trim() : "",
-        image: imageUrl,
-        category: category || "founders",
-        display_order: display_order ? Number(display_order) : 0,
-        linkedin_url: linkedin_url ? linkedin_url.trim() : null,
-        instagram_url: instagram_url ? instagram_url.trim() : null,
-      };
+      const {
+        name,
+        role,
+        tenure,
+        bio,
+        category,
+        display_order,
+        linkedin_url,
+        instagram_url,
+        image,
+      } = req.body;
 
-      const { data, error } = await supabase
-        .from("leadership_members")
-        .insert([payload])
-        .select();
-
-      if (error) throw error;
-      res.json({ success: true, member: data[0] });
-    } catch (error: any) {
-      console.error("Supabase add leadership member error:", error);
-      res.status(500).json({ error: error.message || "Failed to add leadership member" });
-    }
-  });
-
-  app.patch("/api/leadership-members/:id", authenticateOptionalToken, upload.single("file"), async (req: any, res) => {
-    const email = String(req.user?.email || "").trim().toLowerCase();
-    const isAuthorized =
-      req.user?.role === "admin" ||
-      email === "24r01a66v9@cmrithyderabad.edu.in" ||
-      email === "admin@ikshana.local" ||
-      process.env.NODE_ENV !== "production";
-
-    if (!isAuthorized) {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-
-    const { id } = req.params;
-    if (!/^\d+$/.test(id)) {
-      return res.status(400).json({ error: "Invalid member ID. ID must be numeric." });
-    }
-    const { name, role, tenure, bio, category, display_order, linkedin_url, instagram_url, image } = req.body || {};
-
-    try {
-      const updatePayload: Record<string, any> = {};
-
-      if (req.file) {
-        updatePayload.image = await uploadToSupabaseStorage(req.file, "photos");
-      } else if (image !== undefined) {
-        updatePayload.image = image;
+      if (!name || !role) {
+        return res.status(400).json({ error: "Name and role are required" });
       }
 
-      if (name !== undefined) updatePayload.name = name.trim();
-      if (role !== undefined) updatePayload.role = role.trim();
-      if (tenure !== undefined) updatePayload.tenure = tenure.trim();
-      if (bio !== undefined) updatePayload.bio = typeof bio === "string" ? bio.trim() : "";
-      if (category !== undefined) updatePayload.category = category;
-      if (display_order !== undefined) updatePayload.display_order = Number(display_order);
-      if (linkedin_url !== undefined) updatePayload.linkedin_url = linkedin_url ? linkedin_url.trim() : null;
-      if (instagram_url !== undefined) updatePayload.instagram_url = instagram_url ? instagram_url.trim() : null;
+      try {
+        let imageUrl = image || "";
+        if (req.file) {
+          imageUrl = await uploadToSupabaseStorage(req.file, "photos");
+        }
 
-      const { data, error } = await supabase
-        .from("leadership_members")
-        .update(updatePayload)
-        .eq("id", id)
-        .select();
+        const payload = {
+          name: name.trim(),
+          role: role.trim(),
+          tenure: tenure ? tenure.trim() : "2026",
+          bio: typeof bio === "string" ? bio.trim() : "",
+          image: imageUrl,
+          category: category || "founders",
+          display_order: display_order ? Number(display_order) : 0,
+          linkedin_url: linkedin_url ? linkedin_url.trim() : null,
+          instagram_url: instagram_url ? instagram_url.trim() : null,
+        };
 
-      if (error) throw error;
-      return res.json({ success: true, member: data?.[0] });
-    } catch (error: any) {
-      console.error("Supabase update leadership member error:", error);
-      return res.status(500).json({ error: error.message || "Failed to update leadership member" });
+        const { data, error } = await supabase
+          .from("leadership_members")
+          .insert([payload])
+          .select();
+
+        if (error) throw error;
+        res.json({ success: true, member: data[0] });
+      } catch (error: any) {
+        console.error("Supabase add leadership member error:", error);
+        res
+          .status(500)
+          .json({ error: error.message || "Failed to add leadership member" });
+      }
     }
-  });
+  );
 
-  app.delete("/api/leadership-members/:id", authenticateOptionalToken, async (req: any, res) => {
-    const email = String(req.user?.email || "").trim().toLowerCase();
-    const isAuthorized =
-      req.user?.role === "admin" ||
-      email === "24r01a66v9@cmrithyderabad.edu.in" ||
-      email === "admin@ikshana.local" ||
-      process.env.NODE_ENV !== "production";
+  app.patch(
+    "/api/leadership-members/:id",
+    authenticateOptionalToken,
+    upload.single("file"),
+    async (req: any, res) => {
+      const email = String(req.user?.email || "")
+        .trim()
+        .toLowerCase();
+      const isAuthorized =
+        req.user?.role === "admin" ||
+        email === "24r01a66v9@cmrithyderabad.edu.in" ||
+        email === "admin@ikshana.local" ||
+        process.env.NODE_ENV !== "production";
 
-    if (!isAuthorized) {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-
-    const { id } = req.params;
-    if (!/^\d+$/.test(id)) {
-      return res.json({ success: true, message: "Non-numeric ID ignored." });
-    }
-
-    try {
-      const { data: memberData } = await supabase
-        .from("leadership_members")
-        .select("image")
-        .eq("id", id)
-        .single();
-
-      if (memberData && memberData.image && memberData.image.includes("supabase.co/storage/v1/object/public/")) {
-        await deleteFromSupabaseStorage(memberData.image, "photos");
+      if (!isAuthorized) {
+        return res.status(403).json({ error: "Admin access required" });
       }
 
-      const { error } = await supabase.from("leadership_members").delete().eq("id", id);
-      if (error) throw error;
+      const { id } = req.params;
+      if (!/^\d+$/.test(id)) {
+        return res
+          .status(400)
+          .json({ error: "Invalid member ID. ID must be numeric." });
+      }
+      const {
+        name,
+        role,
+        tenure,
+        bio,
+        category,
+        display_order,
+        linkedin_url,
+        instagram_url,
+        image,
+      } = req.body || {};
 
-      return res.json({ success: true });
-    } catch (error: any) {
-      console.error("Supabase delete leadership member error:", error);
-      res.status(500).json({ error: error.message || "Failed to delete leadership member" });
+      try {
+        const updatePayload: Record<string, any> = {};
+
+        if (req.file) {
+          updatePayload.image = await uploadToSupabaseStorage(
+            req.file,
+            "photos"
+          );
+        } else if (image !== undefined) {
+          updatePayload.image = image;
+        }
+
+        if (name !== undefined) updatePayload.name = name.trim();
+        if (role !== undefined) updatePayload.role = role.trim();
+        if (tenure !== undefined) updatePayload.tenure = tenure.trim();
+        if (bio !== undefined)
+          updatePayload.bio = typeof bio === "string" ? bio.trim() : "";
+        if (category !== undefined) updatePayload.category = category;
+        if (display_order !== undefined)
+          updatePayload.display_order = Number(display_order);
+        if (linkedin_url !== undefined)
+          updatePayload.linkedin_url = linkedin_url
+            ? linkedin_url.trim()
+            : null;
+        if (instagram_url !== undefined)
+          updatePayload.instagram_url = instagram_url
+            ? instagram_url.trim()
+            : null;
+
+        const { data, error } = await supabase
+          .from("leadership_members")
+          .update(updatePayload)
+          .eq("id", id)
+          .select();
+
+        if (error) throw error;
+        return res.json({ success: true, member: data?.[0] });
+      } catch (error: any) {
+        console.error("Supabase update leadership member error:", error);
+        return res
+          .status(500)
+          .json({
+            error: error.message || "Failed to update leadership member",
+          });
+      }
     }
-  });
+  );
+
+  app.delete(
+    "/api/leadership-members/:id",
+    authenticateOptionalToken,
+    async (req: any, res) => {
+      const email = String(req.user?.email || "")
+        .trim()
+        .toLowerCase();
+      const isAuthorized =
+        req.user?.role === "admin" ||
+        email === "24r01a66v9@cmrithyderabad.edu.in" ||
+        email === "admin@ikshana.local" ||
+        process.env.NODE_ENV !== "production";
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { id } = req.params;
+      if (!/^\d+$/.test(id)) {
+        return res.json({ success: true, message: "Non-numeric ID ignored." });
+      }
+
+      try {
+        const { data: memberData } = await supabase
+          .from("leadership_members")
+          .select("image")
+          .eq("id", id)
+          .single();
+
+        if (
+          memberData &&
+          memberData.image &&
+          memberData.image.includes("supabase.co/storage/v1/object/public/")
+        ) {
+          await deleteFromSupabaseStorage(memberData.image, "photos");
+        }
+
+        const { error } = await supabase
+          .from("leadership_members")
+          .delete()
+          .eq("id", id);
+        if (error) throw error;
+
+        return res.json({ success: true });
+      } catch (error: any) {
+        console.error("Supabase delete leadership member error:", error);
+        res
+          .status(500)
+          .json({
+            error: error.message || "Failed to delete leadership member",
+          });
+      }
+    }
+  );
 
   // Videos API
   app.get("/api/videos", async (req, res) => {
     try {
-      const { data, error } = await supabase.from("videos").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("videos")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json(data);
     } catch (error) {
@@ -1427,22 +1976,28 @@ async function startServer() {
   });
 
   app.post("/api/videos", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { title, description, url, thumbnail, category, date } = req.body;
-    if (!title || !url) return res.status(400).json({ error: "Title and URL are required" });
+    if (!title || !url)
+      return res.status(400).json({ error: "Title and URL are required" });
 
     try {
-      const { data, error } = await supabase.from("videos").insert([{
-        title,
-        description: description || null,
-        url,
-        thumbnail: thumbnail || null,
-        category: category || "General",
-        date: date || new Date().toLocaleDateString()
-      }]).select();
-      
+      const { data, error } = await supabase
+        .from("videos")
+        .insert([
+          {
+            title,
+            description: description || null,
+            url,
+            thumbnail: thumbnail || null,
+            category: category || "General",
+            date: date || new Date().toLocaleDateString(),
+          },
+        ])
+        .select();
+
       if (error) throw error;
       return res.json({ success: true, id: data[0].id });
     } catch (error) {
@@ -1452,7 +2007,7 @@ async function startServer() {
   });
 
   app.delete("/api/videos/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { id } = req.params;
@@ -1469,7 +2024,10 @@ async function startServer() {
   // Sponsors API
   app.get("/api/sponsors", async (req, res) => {
     try {
-      const { data, error } = await supabase.from("sponsors").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("sponsors")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json(data || []);
     } catch (error) {
@@ -1479,22 +2037,35 @@ async function startServer() {
   });
 
   app.post("/api/sponsors", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
-    const { name, description, logo_url, website_url, type, contact_email, contact_phone } = req.body;
+    const {
+      name,
+      description,
+      logo_url,
+      website_url,
+      type,
+      contact_email,
+      contact_phone,
+    } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
 
     try {
-      const { data, error } = await supabase.from("sponsors").insert([{
-        name,
-        description: description || null,
-        logo_url: logo_url || null,
-        website_url: website_url || null,
-        type: type || "sponsor",
-        contact_email: contact_email || null,
-        contact_phone: contact_phone || null,
-      }]).select();
+      const { data, error } = await supabase
+        .from("sponsors")
+        .insert([
+          {
+            name,
+            description: description || null,
+            logo_url: logo_url || null,
+            website_url: website_url || null,
+            type: type || "sponsor",
+            contact_email: contact_email || null,
+            contact_phone: contact_phone || null,
+          },
+        ])
+        .select();
 
       if (error) throw error;
       return res.json({ success: true, id: data[0].id });
@@ -1505,7 +2076,7 @@ async function startServer() {
   });
 
   app.delete("/api/sponsors/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { id } = req.params;
@@ -1522,7 +2093,11 @@ async function startServer() {
   // Job Openings API
   app.get("/api/jobs", async (req, res) => {
     try {
-      const { data, error } = await supabase.from("job_openings").select("*").eq("is_active", true).order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("job_openings")
+        .select("*")
+        .eq("is_active", true)
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json(data || []);
     } catch (error) {
@@ -1532,23 +2107,39 @@ async function startServer() {
   });
 
   app.post("/api/jobs", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
-    const { title, department, description, requirements, location, job_type, contact_email } = req.body;
-    if (!title || !description) return res.status(400).json({ error: "Title and description are required" });
+    const {
+      title,
+      department,
+      description,
+      requirements,
+      location,
+      job_type,
+      contact_email,
+    } = req.body;
+    if (!title || !description)
+      return res
+        .status(400)
+        .json({ error: "Title and description are required" });
 
     try {
-      const { data, error } = await supabase.from("job_openings").insert([{
-        title,
-        department: department || null,
-        description,
-        requirements: requirements || null,
-        location: location || null,
-        job_type: job_type || "volunteer",
-        contact_email: contact_email || null,
-        is_active: true,
-      }]).select();
+      const { data, error } = await supabase
+        .from("job_openings")
+        .insert([
+          {
+            title,
+            department: department || null,
+            description,
+            requirements: requirements || null,
+            location: location || null,
+            job_type: job_type || "volunteer",
+            contact_email: contact_email || null,
+            is_active: true,
+          },
+        ])
+        .select();
 
       if (error) throw error;
       return res.json({ success: true, id: data[0].id });
@@ -1559,12 +2150,15 @@ async function startServer() {
   });
 
   app.delete("/api/jobs/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { id } = req.params;
     try {
-      const { error } = await supabase.from("job_openings").delete().eq("id", id);
+      const { error } = await supabase
+        .from("job_openings")
+        .delete()
+        .eq("id", id);
       if (error) throw error;
       return res.json({ success: true });
     } catch (error) {
@@ -1576,7 +2170,10 @@ async function startServer() {
   // Reviews API
   app.get("/api/reviews", async (req, res) => {
     try {
-      const { data, error } = await supabase.from("reviews").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("reviews")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json(data);
     } catch (error) {
@@ -1592,12 +2189,17 @@ async function startServer() {
     }
 
     try {
-      const { data, error } = await supabase.from("reviews").insert([{
-        user_name,
-        rating,
-        comment
-      }]).select();
-      
+      const { data, error } = await supabase
+        .from("reviews")
+        .insert([
+          {
+            user_name,
+            rating,
+            comment,
+          },
+        ])
+        .select();
+
       if (error) throw error;
       return res.json({ success: true, id: data[0].id });
     } catch (error) {
@@ -1607,8 +2209,14 @@ async function startServer() {
   });
 
   app.delete("/api/reviews/:id", authenticateToken, async (req: any, res) => {
-    const email = String(req.user?.email || "").trim().toLowerCase();
-    const isAuthorized = req.user?.role === "admin" || email === "24r01a66v9@cmrithyderabad.edu.in" || email === "admin@ikshana.local" || process.env.NODE_ENV !== "production";
+    const email = String(req.user?.email || "")
+      .trim()
+      .toLowerCase();
+    const isAuthorized =
+      req.user?.role === "admin" ||
+      email === "24r01a66v9@cmrithyderabad.edu.in" ||
+      email === "admin@ikshana.local" ||
+      process.env.NODE_ENV !== "production";
 
     if (!isAuthorized) {
       return res.status(403).json({ error: "Admin access required" });
@@ -1628,22 +2236,34 @@ async function startServer() {
 
   // Medical Requests API
   app.post("/api/medical-request", async (req, res) => {
-    const { patient_name, contact_number, emergency_details, hospital_name, required_amount, documents } = req.body;
+    const {
+      patient_name,
+      contact_number,
+      emergency_details,
+      hospital_name,
+      required_amount,
+      documents,
+    } = req.body;
     if (!patient_name || !contact_number || !emergency_details) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     try {
-      const { data, error } = await supabase.from("medical_requests").insert([{
-        patient_name,
-        contact_number,
-        emergency_details,
-        hospital_name,
-        required_amount,
-        documents,
-        status: 'pending'
-      }]).select();
-      
+      const { data, error } = await supabase
+        .from("medical_requests")
+        .insert([
+          {
+            patient_name,
+            contact_number,
+            emergency_details,
+            hospital_name,
+            required_amount,
+            documents,
+            status: "pending",
+          },
+        ])
+        .select();
+
       if (error) throw error;
       return res.json({ success: true, id: data[0].id });
     } catch (error) {
@@ -1662,12 +2282,14 @@ async function startServer() {
         .eq("contact_number", contact)
         .order("created_at", { ascending: false })
         .limit(1);
-      
+
       if (error) throw error;
       if (data && data.length > 0) {
         return res.json(data[0]);
       } else {
-        return res.status(404).json({ error: "No request found for this number" });
+        return res
+          .status(404)
+          .json({ error: "No request found for this number" });
       }
     } catch (error) {
       console.error("Supabase fetch medical request error:", error);
@@ -1681,7 +2303,7 @@ async function startServer() {
         .from("medical_requests")
         .select("*")
         .order("created_at", { ascending: false });
-      
+
       if (error) throw error;
       return res.json(data);
     } catch (error) {
@@ -1690,47 +2312,58 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/medical-request/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-    const { id } = req.params;
+  app.delete(
+    "/api/medical-request/:id",
+    authenticateToken,
+    async (req: any, res) => {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const { id } = req.params;
 
-    try {
-      const { error } = await supabase.from("medical_requests").delete().eq("id", id);
-      if (error) throw error;
-      return res.json({ success: true });
-    } catch (error) {
-      console.error("Supabase delete medical request error:", error);
-      res.status(500).json({ error: "Failed to delete request" });
+      try {
+        const { error } = await supabase
+          .from("medical_requests")
+          .delete()
+          .eq("id", id);
+        if (error) throw error;
+        return res.json({ success: true });
+      } catch (error) {
+        console.error("Supabase delete medical request error:", error);
+        res.status(500).json({ error: "Failed to delete request" });
+      }
     }
-  });
+  );
 
-  app.patch("/api/medical-request/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: "Admin access required" });
+  app.patch(
+    "/api/medical-request/:id",
+    authenticateToken,
+    async (req: any, res) => {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const { id } = req.params;
+      const { status, expiry_date } = req.body;
+
+      try {
+        const updateFields: any = {};
+        if (status !== undefined) updateFields.status = status;
+        if (expiry_date !== undefined) updateFields.expiry_date = expiry_date;
+
+        const { data, error } = await supabase
+          .from("medical_requests")
+          .update(updateFields)
+          .eq("id", id)
+          .select();
+
+        if (error) throw error;
+        return res.json({ success: true, data: data[0] });
+      } catch (error) {
+        console.error("Supabase update medical request error:", error);
+        res.status(500).json({ error: "Failed to update request" });
+      }
     }
-    const { id } = req.params;
-    const { status, expiry_date } = req.body;
-
-    try {
-      const updateFields: any = {};
-      if (status !== undefined) updateFields.status = status;
-      if (expiry_date !== undefined) updateFields.expiry_date = expiry_date;
-
-      const { data, error } = await supabase
-        .from("medical_requests")
-        .update(updateFields)
-        .eq("id", id)
-        .select();
-      
-      if (error) throw error;
-      return res.json({ success: true, data: data[0] });
-    } catch (error) {
-      console.error("Supabase update medical request error:", error);
-      res.status(500).json({ error: "Failed to update request" });
-    }
-  });
+  );
 
   // RSVP API
   app.post("/api/rsvp", async (req, res) => {
@@ -1738,14 +2371,19 @@ async function startServer() {
     if (!event_id || !name || !email) {
       return res.status(400).json({ error: "Missing required fields" });
     }
-    
+
     try {
-      const { data, error } = await supabase.from("rsvps").insert([{
-        event_id,
-        name,
-        email
-      }]).select();
-      
+      const { data, error } = await supabase
+        .from("rsvps")
+        .insert([
+          {
+            event_id,
+            name,
+            email,
+          },
+        ])
+        .select();
+
       if (error) throw error;
       return res.json({ success: true, id: data[0].id });
     } catch (error) {
@@ -1775,9 +2413,13 @@ async function startServer() {
     try {
       console.error("[ERROR HANDLER]", err && err.stack ? err.stack : err);
       if (err && err.name === "MulterError") {
-        return res.status(400).json({ error: err.message || "File upload error" });
+        return res
+          .status(400)
+          .json({ error: err.message || "File upload error" });
       }
-      return res.status(err?.status || 500).json({ error: err?.message || "Internal server error" });
+      return res
+        .status(err?.status || 500)
+        .json({ error: err?.message || "Internal server error" });
     } catch (e) {
       console.error("[ERROR HANDLER] Failed to handle error:", e);
       return res.status(500).json({ error: "Internal server error" });

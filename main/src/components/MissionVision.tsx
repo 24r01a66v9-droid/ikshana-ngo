@@ -22,7 +22,7 @@ export default function MissionVision() {
 
   return (
     <section
-      id="about"
+      id="mission-vision"
       className="relative overflow-hidden px-4 pt-2 pb-16 sm:px-6 sm:pb-24"
     >
       <style>{`

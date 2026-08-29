@@ -4,10 +4,8 @@ import {
   ImageIcon,
   Plus,
   X,
-  Upload,
   Trash2,
   Pencil,
-  Camera,
   Star,
   Eye,
   EyeOff,
@@ -18,6 +16,7 @@ import {
   Sprout,
   BookOpen,
   Megaphone,
+  Quote,
 } from "lucide-react";
 import { buildAuthRequestInit } from "../auth/fetchWithAuth";
 import { Link } from "react-router-dom";
@@ -37,9 +36,8 @@ interface AboutPhoto {
  * Milestones default to this hardcoded list, but are editable by an admin
  * (add / edit / delete via the modal below). Edits are saved to
  * localStorage immediately (so they always persist for this browser) and
- * also POSTed to /api/milestones if that endpoint exists on the backend —
- * if it doesn't yet, the page still works, it just won't sync across
- * devices until that endpoint is added.
+ * also synced to /api/milestones (backed by a `milestones` table — see the
+ * server route additions) so they persist across devices/browsers too.
  */
 
 const MILESTONE_ICONS = {
@@ -119,18 +117,11 @@ const MILESTONES_STORAGE_KEY = "ikshana-journey-milestones";
 // brand maroon based on position — a small visual echo of the foundation's
 // growth, computed automatically so nobody has to pick colors by hand when
 // adding a milestone.
-const lerpHexColor = (from: string, to: string, t: number) => {
-  const f = parseInt(from.slice(1), 16);
-  const g = parseInt(to.slice(1), 16);
-  const fr = (f >> 16) & 255, fg = (f >> 8) & 255, fb = f & 255;
-  const gr = (g >> 16) & 255, gg = (g >> 8) & 255, gb = g & 255;
-  const r = Math.round(fr + (gr - fr) * t);
-  const gCh = Math.round(fg + (gg - fg) * t);
-  const b = Math.round(fb + (gb - fb) * t);
-  return `#${((1 << 24) + (r << 16) + (gCh << 8) + b).toString(16).slice(1)}`;
-};
-const getDotColor = (index: number, total: number) =>
-  lerpHexColor("#f2b9c4", "#7a1f2d", total <= 1 ? 1 : index / (total - 1));
+// Every milestone dot, icon chip, and year now share one consistent brand
+// color instead of interpolating light-to-dark across the timeline — the
+// fading effect made early years look washed out compared to later ones.
+const TIMELINE_COLOR = "#7a1f2d";
+const getDotColor = (_index: number, _total: number) => TIMELINE_COLOR;
 
 const EMPTY_MILESTONE_FORM = { year: "", title: "", description: "", iconKey: "sprout" as MilestoneIconKey };
 
@@ -169,37 +160,29 @@ const STATS: {
   label: string;
   value: number;
   icon: typeof Users;
-  iconBg: string;
   iconColor: string;
-  accent: string;
-  border: string;
+  iconBg: string;
 }[] = [
   {
     label: "Volunteers",
     value: 100,
     icon: Users,
-    iconBg: "bg-amber-100",
     iconColor: "text-amber-600",
-    accent: "bg-amber-300",
-    border: "border-amber-100",
+    iconBg: "bg-amber-100",
   },
   {
     label: "Donation Drives",
     value: 30,
     icon: HandHeart,
-    iconBg: "bg-rose-100",
     iconColor: "text-rose-600",
-    accent: "bg-rose-300",
-    border: "border-rose-100",
+    iconBg: "bg-rose-100",
   },
   {
     label: "Awareness Programs",
     value: 5,
     icon: Sparkles,
-    iconBg: "bg-teal-100",
     iconColor: "text-teal-600",
-    accent: "bg-teal-300",
-    border: "border-teal-100",
+    iconBg: "bg-teal-100",
   },
 ];
 
@@ -215,10 +198,6 @@ export default function About() {
   const [featuredPhotoId, setFeaturedPhotoId] = useState<string | null>(null);
   const [showFeaturedImage, setShowFeaturedImage] = useState(true);
   const [bigPhoto, setBigPhoto] = useState<string | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
-  const [newPhoto, setNewPhoto] = useState({ caption: "", category: "about", file: null as File | null });
-  const [dragActive, setDragActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [milestones, setMilestones] = useState<Milestone[]>(DEFAULT_MILESTONES);
   const [isMilestoneFormOpen, setIsMilestoneFormOpen] = useState(false);
@@ -360,74 +339,6 @@ export default function About() {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setNewPhoto({ ...newPhoto, file: e.target.files[0] });
-    }
-  };
-
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setNewPhoto({ ...newPhoto, file: e.dataTransfer.files[0] });
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPhoto.file) return;
-
-    const formData = new FormData();
-    formData.append("file", newPhoto.file);
-    formData.append("title", newPhoto.caption || "About Moment");
-    formData.append("category", newPhoto.category);
-    formData.append("date", new Date().toLocaleDateString());
-    // Only mark uploads as featured when the user explicitly chose the `hero` section
-    formData.append("is_featured", newPhoto.category === "hero" ? "true" : "false");
-
-    try {
-      const response = await fetch("/api/photos", buildAuthRequestInit({
-        method: "POST",
-        body: formData,
-      }));
-
-      if (response.ok) {
-        const result = await response.json();
-        // If the upload was for the hero/main image, update the featured display.
-        if (newPhoto.category === "hero") {
-          setFeaturedImage(result.url);
-          setFeaturedPhotoId(result.id);
-          setShowFeaturedImage(true);
-        }
-
-        // Add to archive locally and then refresh from server. About-category uploads
-        // will no longer override the featured image at the top of the page.
-        setPhotos(prev => [{ id: result.id, url: result.url, caption: newPhoto.caption || "About Moment", is_featured: newPhoto.category === "hero" }, ...prev]);
-        fetchPhotos();
-        setIsAdding(false);
-        setNewPhoto({ caption: "", category: "about", file: null });
-      } else {
-        const errorData = await response.json();
-        alert(`Upload failed: ${errorData.error || "Unknown error"}`);
-      }
-    } catch (e) {
-      console.error("Failed to upload about photo", e);
-      alert("An error occurred during upload. Please try again.");
-    }
-  };
-
   const featurePhoto = async (id: string) => {
     try {
       const response = await fetch(`/api/photos/${id}/feature`, buildAuthRequestInit({
@@ -470,7 +381,7 @@ export default function About() {
   const marqueeDuration = Math.max(22, marqueePhotos.length * 2.5);
 
   return (
-    <section id="about" className="py-24 px-4 sm:py-32 sm:px-6 bg-white overflow-hidden">
+    <section id="about" className="pt-24 pb-8 px-4 sm:pt-32 sm:pb-14 sm:px-6 bg-white overflow-hidden">
       <style>{`
         @keyframes ikshana-marquee {
           from { transform: translateX(0); }
@@ -493,17 +404,12 @@ export default function About() {
           viewport={{ once: true }}
           className="relative -mx-4 mb-16 sm:-mx-6 lg:-mx-10"
         >
-          {/* Mobile: object-contain (full photo, nothing cropped) inside a
-              shorter box, with a blurred copy of the same image filling the
-              background so there's no stark empty letterboxing. Desktop
-              keeps the tall, cinematic object-cover banner. */}
-          <div className="relative h-[46vh] overflow-hidden rounded-b-[2rem] bg-brand-maroon/5 shadow-2xl sm:h-[85vh] sm:rounded-b-[2.5rem] lg:h-[92vh]">
-            <img
-              src={featuredImage}
-              alt=""
-              aria-hidden="true"
-              className="absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl sm:hidden"
-            />
+          {/* object-cover on every breakpoint: no letterboxing, no blurred
+              filler bands (that was reading as a "shadow" above/below the
+              photo on mobile). loading="eager" + fetchPriority="high" make
+              sure this, the very first image on the page, renders as soon
+              as possible instead of popping in late. */}
+          <div className="relative h-[38vh] overflow-hidden rounded-b-[2rem] bg-brand-maroon/5 sm:h-[85vh] sm:rounded-b-[2.5rem] sm:shadow-2xl lg:h-[92vh]">
             <div className="absolute right-4 top-4 z-10 flex gap-2 sm:right-6 sm:top-6">
               {isAdmin && featuredImage && (
                 <button
@@ -527,7 +433,10 @@ export default function About() {
             <img
               src={featuredImage}
               alt="About Featured"
-              className="relative h-full w-full object-contain sm:object-cover"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
+              className="relative h-full w-full object-cover"
               referrerPolicy="no-referrer"
             />
           </div>
@@ -543,14 +452,25 @@ export default function About() {
           viewport={{ once: true }}
           className="relative rounded-[1.75rem] border border-brand-maroon/10 bg-white p-4 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.22)] sm:p-6 lg:p-8"
         >
-          <motion.p
+          {/* Mission statement — full-width quote treatment so it no longer
+              reads as a short line stranded on the left with dead space to
+              the right. */}
+          <motion.div
             initial={{ y: 20, opacity: 0 }}
             whileInView={{ y: 0, opacity: 1 }}
             viewport={{ once: true }}
-            className="mb-16 max-w-3xl text-lg leading-relaxed text-brand-maroon/80 italic sm:mb-20 sm:text-xl"
+            className="relative mb-16 flex gap-4 border-l-4 border-brand-maroon/25 pl-5 sm:mb-20 sm:gap-6 sm:pl-8"
           >
-            We work to support communities in need, raise awareness about important social causes, and inspire people to come together for a better tomorrow.
-          </motion.p>
+            <Quote
+              size={34}
+              className="hidden shrink-0 -scale-x-100 text-brand-maroon/15 sm:block"
+              aria-hidden="true"
+            />
+            <p className="w-full font-serif text-xl italic leading-relaxed text-brand-maroon sm:text-3xl lg:text-[2.15rem] lg:leading-[1.5]">
+              We work to support communities in need, raise awareness about important social causes,
+              and inspire people to come together for a better tomorrow.
+            </p>
+          </motion.div>
 
           {/* Founding badges + impact strip */}
           <motion.div
@@ -559,37 +479,40 @@ export default function About() {
             viewport={{ once: true }}
             className="mb-20 sm:mb-28"
           >
-            <div className="mb-8 flex flex-wrap items-center justify-center gap-3 sm:mb-10">
-              <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-5 py-3 text-sm font-semibold text-brand-maroon/80 sm:text-base">
-                <CalendarDays size={17} className="text-brand-maroon" />
+            <div className="mb-8 flex flex-nowrap items-center justify-center gap-2 sm:mb-10 sm:gap-4">
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-brand-maroon/20 bg-brand-maroon/[0.07] px-3.5 py-2.5 text-[11px] font-medium text-brand-maroon sm:gap-2 sm:px-5 sm:py-3 sm:text-base">
+                <CalendarDays size={15} className="shrink-0 text-brand-maroon sm:h-[17px] sm:w-[17px]" />
                 Est. 2021
               </span>
-              <span className="inline-flex items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-maroon/5 px-5 py-3 text-sm font-semibold text-brand-maroon/80 sm:text-base">
-                <HandHeart size={17} className="text-brand-maroon" />
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-brand-maroon/20 bg-brand-maroon/[0.07] px-3.5 py-2.5 text-[11px] font-medium text-brand-maroon sm:gap-2 sm:px-5 sm:py-3 sm:text-base">
+                <HandHeart size={15} className="shrink-0 text-brand-maroon sm:h-[17px] sm:w-[17px]" />
                 Community-led service
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 sm:gap-5">
+            {/* Stats: one unified card with divider lines. Numbers use a
+                medium-weight sans-serif with tabular figures for a clean,
+                confident look without reading as heavy/bold; icons sit in
+                a colored badge so they don't get lost next to the large
+                numbers. */}
+            <div className="grid grid-cols-3 divide-x divide-brand-maroon/10 overflow-hidden rounded-[1.5rem] border border-brand-maroon/10 bg-white shadow-sm sm:rounded-[2rem]">
               {STATS.map((stat) => {
                 const Icon = stat.icon;
                 return (
-                  <motion.div
+                  <div
                     key={stat.label}
-                    whileHover={{ y: -4 }}
-                    className={`relative overflow-hidden rounded-[1.35rem] border bg-white p-4 text-center shadow-sm transition-shadow hover:shadow-lg sm:rounded-[1.75rem] sm:p-8 ${stat.border}`}
+                    className="flex flex-col items-center gap-2 px-2 py-7 text-center sm:gap-3.5 sm:py-11"
                   >
-                    <span aria-hidden="true" className={`absolute inset-x-0 top-0 h-1 ${stat.accent}`} />
-                    <div className={`mx-auto mb-2.5 flex h-10 w-10 items-center justify-center rounded-2xl sm:mb-4 sm:h-14 sm:w-14 ${stat.iconBg}`}>
-                      <Icon size={18} className={`${stat.iconColor} sm:h-6 sm:w-6`} />
-                    </div>
-                    <h3 className="font-serif text-2xl text-brand-maroon sm:text-4xl lg:text-5xl">
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-full sm:h-12 sm:w-12 ${stat.iconBg}`}>
+                      <Icon size={18} className={`${stat.iconColor} sm:h-6 sm:w-6`} strokeWidth={2.25} />
+                    </span>
+                    <h3 className="font-sans text-3xl font-medium not-italic leading-none tracking-tight text-brand-maroon [font-variant-numeric:tabular-nums] sm:text-5xl lg:text-6xl">
                       <CountUpStat value={stat.value} suffix="+" />
                     </h3>
-                    <p className="mt-1.5 text-[8px] font-bold uppercase leading-tight tracking-wider text-brand-maroon/45 sm:mt-2 sm:text-[10px] sm:tracking-[0.15em]">
+                    <p className="text-[10px] font-semibold uppercase leading-tight tracking-[0.12em] text-brand-maroon/70 sm:text-xs sm:tracking-[0.16em]">
                       {stat.label}
                     </p>
-                  </motion.div>
+                  </div>
                 );
               })}
             </div>
@@ -601,43 +524,47 @@ export default function About() {
               initial={{ y: 20, opacity: 0 }}
               whileInView={{ y: 0, opacity: 1 }}
               viewport={{ once: true }}
-              className="mb-12 flex flex-col gap-4 sm:mb-16 sm:flex-row sm:items-end sm:justify-between"
+              className="mb-12 sm:mb-16"
             >
-              <div>
-                <div className="mb-4 flex items-center gap-3">
-                  <span className="h-px w-10 bg-brand-maroon/40" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
-                    Our Story
-                  </span>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="h-[3px] w-12 rounded-full bg-brand-maroon/60" />
+                    <span className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-maroon sm:text-base">
+                      Our Story
+                    </span>
+                  </div>
+                  <h2 className="font-serif text-4xl italic text-brand-maroon sm:text-5xl">The Ikshana Journey</h2>
                 </div>
-                <h2 className="font-serif text-4xl text-brand-maroon sm:text-5xl">The Ikshana Journey</h2>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-brand-maroon/60 sm:text-base">
-                  Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
-                </p>
-              </div>
 
-              {isAdmin && (
-                <button
-                  onClick={openAddMilestone}
-                  className="inline-flex items-center gap-2 self-start rounded-full bg-brand-maroon px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900 sm:self-auto"
-                >
-                  <Plus size={15} />
-                  Add Milestone
-                </button>
-              )}
+                {isAdmin && (
+                  <button
+                    onClick={openAddMilestone}
+                    className="inline-flex items-center gap-2 self-start rounded-full bg-brand-maroon px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900 sm:self-auto"
+                  >
+                    <Plus size={15} />
+                    Add Milestone
+                  </button>
+                )}
+              </div>
+              <p className="mt-4 max-w-none text-base leading-7 text-brand-maroon/75 sm:text-lg sm:leading-8">
+                Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
+              </p>
             </motion.div>
 
             <div className="relative">
-              {/* Spine: lightens at the start (2021) and deepens toward the
-                  brand maroon at the end (today), a small visual echo of the
-                  foundation's own growth. */}
+              {/* Spine: a single solid brand-maroon line at reduced opacity,
+                  thick enough to read as a deliberate design element rather
+                  than a stray hairline. Every dot along it now uses the same
+                  color (see TIMELINE_COLOR) instead of fading in from a
+                  lighter tint at 2021. */}
               <div
                 aria-hidden="true"
-                className="absolute left-[15px] top-2 bottom-2 w-px sm:left-1/2 sm:-translate-x-1/2"
-                style={{ background: "linear-gradient(to bottom, #f2b9c4, #7a1f2d)" }}
+                className="absolute left-4 top-2 bottom-2 w-[3px] rounded-full sm:left-1/2 sm:-translate-x-1/2"
+                style={{ backgroundColor: TIMELINE_COLOR, opacity: 0.35 }}
               />
 
-              <div className="space-y-8 sm:space-y-12">
+              <div className="space-y-6 sm:space-y-8">
                 {milestones.map((milestone, index) => {
                   const Icon = MILESTONE_ICONS[milestone.iconKey] ?? Sparkles;
                   const isRight = index % 2 === 1;
@@ -650,22 +577,39 @@ export default function About() {
                       whileInView={{ y: 0, opacity: 1 }}
                       viewport={{ once: true, margin: "-60px" }}
                       transition={{ duration: 0.5, delay: 0.05 }}
-                      className={`relative flex flex-col gap-2 pl-10 sm:flex-row sm:items-center sm:gap-0 sm:pl-0 ${
+                      className={`relative flex flex-col gap-2 pl-14 sm:flex-row sm:items-center sm:gap-0 sm:pl-0 ${
                         isRight ? "sm:flex-row-reverse" : ""
                       }`}
                     >
+                      {/* Dot */}
                       <div
                         aria-hidden="true"
-                        className="absolute left-[7px] top-3 z-10 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full border-4 border-white shadow-md sm:left-1/2 sm:top-1/2 sm:-translate-y-1/2"
+                        className="absolute left-4 top-3 z-10 flex h-11 w-11 -translate-x-1/2 items-center justify-center rounded-full border-[3px] border-white shadow-lg sm:left-1/2 sm:top-1/2 sm:h-12 sm:w-12 sm:-translate-y-1/2"
                         style={{ backgroundColor: dotColor }}
                       >
-                        <Icon size={11} className="text-white" />
+                        <Icon size={20} className="text-white sm:h-[22px] sm:w-[22px]" strokeWidth={2.25} />
                       </div>
 
+                      {/* Connector stub linking the dot straight to its card so
+                          the two sides of the zigzag don't feel disconnected */}
+                      <span
+                        aria-hidden="true"
+                        className={`absolute top-1/2 hidden h-[3px] w-8 -translate-y-1/2 sm:block ${
+                          isRight ? "left-1/2" : "right-1/2"
+                        }`}
+                        style={{ backgroundColor: dotColor }}
+                      />
+
                       <div className={`sm:w-1/2 ${isRight ? "sm:pl-10" : "sm:pr-10"}`}>
-                        <div className="group relative rounded-[1.5rem] border border-brand-maroon/10 bg-white p-5 shadow-[0_14px_34px_-22px_rgba(91,63,212,0.3)] transition-all hover:-translate-y-1 hover:shadow-[0_22px_44px_-20px_rgba(91,63,212,0.35)] sm:rounded-[1.75rem] sm:p-7">
+                        <div className="group relative rounded-[1.75rem] border border-brand-maroon/10 bg-white p-6 shadow-[0_14px_34px_-22px_rgba(91,63,212,0.3)] transition-all hover:-translate-y-1 hover:shadow-[0_22px_44px_-20px_rgba(91,63,212,0.35)] sm:p-8">
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-x-6 top-0 h-[3px] rounded-full sm:inset-x-8"
+                            style={{ backgroundColor: dotColor }}
+                          />
+
                           {isAdmin && (
-                            <div className="absolute right-3 top-3 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="absolute right-4 top-4 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                               <button
                                 type="button"
                                 onClick={() => openEditMilestone(milestone)}
@@ -685,11 +629,24 @@ export default function About() {
                             </div>
                           )}
 
-                          <span className="font-serif text-2xl sm:text-3xl" style={{ color: dotColor }}>
-                            {milestone.year}
-                          </span>
-                          <h4 className="mt-1.5 text-base font-bold text-brand-maroon sm:text-lg">{milestone.title}</h4>
-                          <p className="mt-1.5 text-sm leading-6 text-brand-maroon/65">{milestone.description}</p>
+                          <div className="mb-4 flex items-center gap-3.5">
+                            <span
+                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm sm:h-12 sm:w-12"
+                              style={{ backgroundColor: `${dotColor}20` }}
+                            >
+                              <Icon size={20} style={{ color: dotColor }} strokeWidth={2.25} className="sm:h-[22px] sm:w-[22px]" />
+                            </span>
+                            <span
+                              className="font-sans text-3xl font-medium not-italic tracking-tight [font-variant-numeric:tabular-nums] sm:text-4xl"
+                              style={{ color: dotColor }}
+                            >
+                              {milestone.year}
+                            </span>
+                          </div>
+                          <h4 className="text-xl font-semibold text-brand-maroon sm:text-2xl">{milestone.title}</h4>
+                          <p className="mt-3 text-base leading-7 text-brand-maroon/90 sm:text-lg sm:leading-8">
+                            {milestone.description}
+                          </p>
                         </div>
                       </div>
                       <div className="hidden sm:block sm:w-1/2" aria-hidden="true" />
@@ -710,7 +667,7 @@ export default function About() {
             >
               <div className="mb-6 flex items-center gap-3">
                 <span className="h-px w-10 bg-brand-maroon/40" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-brand-maroon/50">
                   Moments So Far
                 </span>
               </div>
@@ -743,36 +700,6 @@ export default function About() {
 
           {/* About Archive Section */}
           <div className="space-y-8">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              whileInView={{ y: 0, opacity: 1 }}
-              viewport={{ once: true }}
-              className="flex flex-wrap items-center justify-between gap-4"
-            >
-              <div>
-                <div className="mb-4 flex items-center gap-3">
-                  <span className="h-px w-10 bg-brand-maroon/40" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-maroon/50">
-                    Faces &amp; Moments
-                  </span>
-                </div>
-                <h3 className="font-serif text-2xl text-brand-maroon sm:text-3xl">The people behind the work</h3>
-                <p className="mt-2 max-w-md text-sm leading-6 text-brand-maroon/60">
-                  A closer look at the volunteers, events, and everyday moments that make up Ikshana.
-                </p>
-              </div>
-
-              {isAdmin && (
-                <button 
-                  onClick={() => { setNewPhoto({ caption: "", category: "about", file: null }); setIsAdding(true); }}
-                  className="flex items-center gap-3 bg-brand-maroon text-white px-8 py-5 rounded-full font-bold tracking-widest uppercase text-[10px] hover:bg-stone-900 transition-all shadow-xl shadow-brand-maroon/20 self-start"
-                >
-                  <Camera size={16} />
-                  Add Team Photo
-                </button>
-              )}
-            </motion.div>
-
             {photos.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 <AnimatePresence mode="popLayout">
@@ -820,121 +747,6 @@ export default function About() {
           </div>
         </motion.div>
       </div>
-
-      {/* Upload Modal */}
-      <AnimatePresence>
-        {isAdding && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAdding(false)}
-              className="absolute inset-0 bg-stone-900/90 backdrop-blur-md"
-            />
-            
-            <motion.div 
-              initial={{ opacity: 0, y: 100 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 100 }}
-              className="relative w-full max-w-xl bg-white rounded-[3rem] p-12 shadow-2xl"
-            >
-              <button 
-                onClick={() => setIsAdding(false)}
-                className="absolute top-8 right-8 text-stone-400 hover:text-stone-900 transition-colors"
-              >
-                <X size={24} />
-              </button>
-
-              <div className="mb-10">
-                <span className="text-brand-red font-bold tracking-widest uppercase text-[10px] mb-2 block">Foundation Archive</span>
-                <h3 className="text-4xl font-serif">Add Team Photo</h3>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-8">
-                <div className="group">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-3">Section</label>
-                  <div className="flex gap-3">
-                    <div>
-                      <span className="px-6 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest bg-brand-maroon text-white shadow-lg shadow-brand-maroon/20">About Archive</span>
-                      <p className="text-[10px] text-stone-400 mt-2">Team photos are always saved to the About archive and won't replace the page hero.</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-3">Caption</label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="e.g., Founding team meeting, 2021"
-                    className="w-full bg-stone-50 border border-stone-100 rounded-2xl px-6 py-4 focus:outline-none focus:ring-2 focus:ring-brand-red/20 transition-all font-serif"
-                    value={newPhoto.caption}
-                    onChange={(e) => setNewPhoto({ ...newPhoto, caption: e.target.value })}
-                  />
-                </div>
-
-                <div 
-                  className={`relative border-2 border-dashed rounded-[2.5rem] p-10 transition-all flex flex-col items-center justify-center text-center group ${
-                    dragActive ? "border-brand-red bg-brand-red/5" : "border-stone-100 bg-stone-50 hover:bg-stone-100/50"
-                  }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  {newPhoto.file ? (
-                    <div className="flex flex-col items-center">
-                      <div className="w-24 h-24 rounded-[1.5rem] overflow-hidden mb-6 shadow-xl border-4 border-white">
-                        <img 
-                          src={URL.createObjectURL(newPhoto.file)} 
-                          alt="Preview" 
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <p className="text-stone-900 font-serif text-xs mb-2">{newPhoto.file.name}</p>
-                      <button 
-                        type="button"
-                        onClick={() => setNewPhoto({ ...newPhoto, file: null })}
-                        className="text-brand-red text-[10px] font-bold uppercase tracking-widest hover:underline"
-                      >
-                        Replace Image
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center text-stone-300 mb-6 shadow-sm group-hover:scale-110 transition-transform">
-                        <Upload size={20} />
-                      </div>
-                      <p className="text-stone-500 text-xs mb-2 font-serif">
-                        Drop a team memory here
-                      </p>
-                      <p className="text-stone-400 text-[10px] uppercase tracking-widest">
-                        or <span className="text-brand-red font-bold cursor-pointer">browse files</span>
-                      </p>
-                      <input 
-                        ref={fileInputRef}
-                        type="file" 
-                        accept="image/*"
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                        onChange={handleFileChange}
-                      />
-                    </>
-                  )}
-                </div>
-
-                <button 
-                  type="submit"
-                  disabled={!newPhoto.file}
-                  className="w-full bg-stone-900 text-white py-6 rounded-2xl font-bold tracking-[0.2em] uppercase text-[10px] hover:bg-brand-red transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl"
-                >
-                  {newPhoto.category === "hero" ? "Save as Hero" : "Save to Archive"}
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Add / edit milestone modal */}
       <AnimatePresence>
