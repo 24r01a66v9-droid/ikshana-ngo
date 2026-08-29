@@ -1258,19 +1258,26 @@ export default function Gallery() {
           </div>
 
           {filteredMemories.length === 0 ? (
+            // On mobile the old aspect-[21/9] box was very short and wide,
+            // which squeezed the heading/copy and made them look clipped.
+            // Below `sm` we drop the aspect ratio in favor of a min-height
+            // that comfortably fits the (smaller) icon/text, and let the
+            // wide letterboxed look return from `sm` up where there's
+            // enough width for it.
             <motion.div
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
-              className="aspect-[21/9] flex flex-col items-center justify-center border border-brand-maroon/10 rounded-[2.5rem] bg-[#fffcfc] relative overflow-hidden"
+              className="flex min-h-[340px] flex-col items-center justify-center rounded-[2rem] border border-brand-maroon/10 bg-[#fffcfc] px-6 py-10 relative overflow-hidden sm:aspect-[21/9] sm:min-h-0 sm:rounded-[2.5rem] sm:px-0 sm:py-0"
             >
-              <div className="relative z-10 text-center px-6">
-                <div className="w-20 h-20 bg-[#fff8f5] text-brand-maroon/30 rounded-full flex items-center justify-center mx-auto mb-8 shadow-sm">
-                  <ImageIcon size={36} />
+              <div className="relative z-10 text-center px-2 sm:px-6">
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[#fff8f5] text-brand-maroon/30 shadow-sm sm:mb-8 sm:h-20 sm:w-20">
+                  <ImageIcon size={28} className="sm:hidden" />
+                  <ImageIcon size={36} className="hidden sm:block" />
                 </div>
-                <h3 className="text-2xl font-serif mb-3 text-brand-maroon">
+                <h3 className="mb-2.5 font-serif text-xl text-brand-maroon sm:mb-3 sm:text-2xl">
                   {activeType === "all" ? "No memories yet" : `No ${getArchiveTypeMeta(activeType).plural.toLowerCase()} yet`}
                 </h3>
-                <p className="text-brand-maroon/50 mb-8 max-w-sm mx-auto text-sm leading-relaxed">
+                <p className="mx-auto mb-6 max-w-xs text-xs leading-relaxed text-brand-maroon/50 sm:mb-8 sm:max-w-sm sm:text-sm">
                   Be the first to add a photo and start building the archive.
                 </p>
                 {isAdmin && (
@@ -1417,7 +1424,6 @@ export default function Gallery() {
                         <div className="mt-2.5 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-brand-maroon/45 sm:mt-3 sm:text-xs sm:tracking-[0.18em]">
                           <CalendarDays size={12} className="shrink-0 text-brand-maroon/40" aria-hidden="true" />
                           <span>{formatDisplayDate(memory.date)}</span>
-                          {photoCount > 1 && <span className="text-brand-maroon/30">&middot; {photoCount} photos</span>}
                         </div>
                       </div>
                     </motion.div>
