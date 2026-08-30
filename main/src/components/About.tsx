@@ -402,14 +402,17 @@ export default function About() {
           initial={{ y: 30, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           viewport={{ once: true }}
-          className="relative -mx-4 mb-16 sm:-mx-6 lg:-mx-10"
+          className="relative -mx-4 mb-8 sm:-mx-6 sm:mb-12 lg:-mx-10"
         >
-          {/* object-cover on every breakpoint: no letterboxing, no blurred
-              filler bands (that was reading as a "shadow" above/below the
-              photo on mobile). loading="eager" + fetchPriority="high" make
-              sure this, the very first image on the page, renders as soon
-              as possible instead of popping in late. */}
-          <div className="relative h-[38vh] overflow-hidden rounded-b-[2rem] bg-brand-maroon/5 sm:h-[85vh] sm:rounded-b-[2.5rem] sm:shadow-2xl lg:h-[92vh]">
+          {/* No forced aspect ratio and no fixed height: the box's height is
+              simply whatever the image's own natural aspect ratio produces
+              at 100% width. That's the only way to guarantee both "never
+              cropped" and "no colored letterbox bands" at once, on every
+              device and orientation — including "Desktop site" mode in a
+              mobile browser, since this is driven purely by width, never
+              viewport height. loading="eager" + fetchPriority="high" keep
+              this, the very first image on the page, from popping in late. */}
+          <div className="relative w-full overflow-hidden rounded-b-[2rem] bg-brand-maroon/5 sm:rounded-b-[2.5rem] sm:shadow-2xl">
             <div className="absolute right-4 top-4 z-10 flex gap-2 sm:right-6 sm:top-6">
               {isAdmin && featuredImage && (
                 <button
@@ -436,7 +439,7 @@ export default function About() {
               loading="eager"
               fetchPriority="high"
               decoding="async"
-              className="relative h-full w-full object-cover"
+              className="relative block h-auto w-full"
               referrerPolicy="no-referrer"
             />
           </div>
@@ -466,7 +469,7 @@ export default function About() {
               className="hidden shrink-0 -scale-x-100 text-brand-maroon/15 sm:block"
               aria-hidden="true"
             />
-            <p className="w-full font-serif text-xl italic leading-relaxed text-brand-maroon sm:text-3xl lg:text-[2.15rem] lg:leading-[1.5]">
+            <p className="w-full font-serif text-lg font-medium italic leading-relaxed text-brand-maroon sm:text-xl lg:text-2xl lg:leading-relaxed">
               We work to support communities in need, raise awareness about important social causes,
               and inspire people to come together for a better tomorrow.
             </p>
@@ -519,12 +522,17 @@ export default function About() {
           </motion.div>
 
           {/* The Ikshana Journey — signature timeline, 2021 to today */}
-          <div className="mb-20 sm:mb-28">
+          <div className="relative mb-20 sm:mb-28">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -left-10 top-40 h-[420px] w-[420px] rounded-full bg-brand-maroon opacity-[0.03] blur-[140px]"
+            />
+
             <motion.div
               initial={{ y: 20, opacity: 0 }}
               whileInView={{ y: 0, opacity: 1 }}
               viewport={{ once: true }}
-              className="mb-12 sm:mb-16"
+              className="relative mb-12 sm:mb-16"
             >
               <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
@@ -553,15 +561,24 @@ export default function About() {
             </motion.div>
 
             <div className="relative">
-              {/* Spine: a single solid brand-maroon line at reduced opacity,
-                  thick enough to read as a deliberate design element rather
-                  than a stray hairline. Every dot along it now uses the same
-                  color (see TIMELINE_COLOR) instead of fading in from a
-                  lighter tint at 2021. */}
+              {/* Spine: a single solid brand-maroon line with a soft glow,
+                  capped top and bottom with small circles so it reads as a
+                  deliberately designed timeline rather than a stray rule.
+                  Every node along it shares one color (TIMELINE_COLOR)
+                  rather than fading in from a lighter tint at 2021. */}
               <div
                 aria-hidden="true"
                 className="absolute left-4 top-2 bottom-2 w-[3px] rounded-full sm:left-1/2 sm:-translate-x-1/2"
-                style={{ backgroundColor: TIMELINE_COLOR, opacity: 0.35 }}
+                style={{
+                  backgroundColor: TIMELINE_COLOR,
+                  opacity: 0.35,
+                  boxShadow: `0 0 16px 0 ${TIMELINE_COLOR}33`,
+                }}
+              />
+              <span
+                aria-hidden="true"
+                className="absolute left-4 top-2 z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full sm:left-1/2"
+                style={{ backgroundColor: TIMELINE_COLOR }}
               />
 
               <div className="space-y-6 sm:space-y-8">
@@ -584,10 +601,10 @@ export default function About() {
                       {/* Dot */}
                       <div
                         aria-hidden="true"
-                        className="absolute left-4 top-3 z-10 flex h-11 w-11 -translate-x-1/2 items-center justify-center rounded-full border-[3px] border-white shadow-lg sm:left-1/2 sm:top-1/2 sm:h-12 sm:w-12 sm:-translate-y-1/2"
+                        className="absolute left-4 top-3 z-10 flex h-11 w-11 -translate-x-1/2 items-center justify-center rounded-full border-[3px] border-white shadow-lg sm:left-1/2 sm:top-1/2 sm:h-[3.25rem] sm:w-[3.25rem] sm:-translate-y-1/2"
                         style={{ backgroundColor: dotColor }}
                       >
-                        <Icon size={20} className="text-white sm:h-[22px] sm:w-[22px]" strokeWidth={2.25} />
+                        <Icon size={19} className="text-white sm:h-[22px] sm:w-[22px]" strokeWidth={2.25} />
                       </div>
 
                       {/* Connector stub linking the dot straight to its card so
@@ -601,15 +618,23 @@ export default function About() {
                       />
 
                       <div className={`sm:w-1/2 ${isRight ? "sm:pl-10" : "sm:pr-10"}`}>
-                        <div className="group relative rounded-[1.75rem] border border-brand-maroon/10 bg-white p-6 shadow-[0_14px_34px_-22px_rgba(91,63,212,0.3)] transition-all hover:-translate-y-1 hover:shadow-[0_22px_44px_-20px_rgba(91,63,212,0.35)] sm:p-8">
+                        <div className="group relative overflow-hidden rounded-[1.75rem] border border-brand-maroon/10 bg-white p-7 shadow-[0_18px_40px_-26px_rgba(122,31,45,0.28)] transition-all hover:-translate-y-1.5 hover:shadow-[0_28px_54px_-22px_rgba(122,31,45,0.32)] sm:rounded-[2.25rem] sm:p-9">
+                          {/* Soft color bloom in the corner — adds richness
+                              without any extra text or labels */}
                           <span
                             aria-hidden="true"
-                            className="absolute inset-x-6 top-0 h-[3px] rounded-full sm:inset-x-8"
-                            style={{ backgroundColor: dotColor }}
+                            className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full blur-3xl"
+                            style={{ backgroundColor: dotColor, opacity: 0.07 }}
+                          />
+
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-x-7 top-0 h-[3px] rounded-full sm:inset-x-9"
+                            style={{ background: `linear-gradient(90deg, ${dotColor}, ${dotColor}30)` }}
                           />
 
                           {isAdmin && (
-                            <div className="absolute right-4 top-4 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="absolute right-4 top-4 z-10 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                               <button
                                 type="button"
                                 onClick={() => openEditMilestone(milestone)}
@@ -629,22 +654,19 @@ export default function About() {
                             </div>
                           )}
 
-                          <div className="mb-4 flex items-center gap-3.5">
-                            <span
-                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm sm:h-12 sm:w-12"
-                              style={{ backgroundColor: `${dotColor}20` }}
-                            >
-                              <Icon size={20} style={{ color: dotColor }} strokeWidth={2.25} className="sm:h-[22px] sm:w-[22px]" />
-                            </span>
-                            <span
-                              className="font-sans text-3xl font-medium not-italic tracking-tight [font-variant-numeric:tabular-nums] sm:text-4xl"
-                              style={{ color: dotColor }}
-                            >
-                              {milestone.year}
-                            </span>
-                          </div>
-                          <h4 className="text-xl font-semibold text-brand-maroon sm:text-2xl">{milestone.title}</h4>
-                          <p className="mt-3 text-base leading-7 text-brand-maroon/90 sm:text-lg sm:leading-8">
+                          <span
+                            className="relative block font-sans text-2xl font-medium not-italic tracking-tight [font-variant-numeric:tabular-nums] sm:text-4xl"
+                            style={{ color: dotColor }}
+                          >
+                            {milestone.year}
+                          </span>
+                          <h4 className="relative mt-3 text-xl font-semibold text-brand-maroon sm:text-2xl">{milestone.title}</h4>
+                          <span
+                            aria-hidden="true"
+                            className="relative mb-3 mt-1.5 block h-[3px] w-10 rounded-full"
+                            style={{ background: `linear-gradient(90deg, ${dotColor}, ${dotColor}20)` }}
+                          />
+                          <p className="relative text-sm leading-6 text-brand-maroon/90 sm:text-base sm:leading-7 md:text-lg md:leading-8">
                             {milestone.description}
                           </p>
                         </div>

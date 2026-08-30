@@ -171,7 +171,7 @@ export default function MissionVision() {
                 </div>
               </div>
 
-              <ul className="max-w-4xl space-y-3.5 text-sm leading-relaxed text-brand-maroon/80 sm:space-y-4 sm:text-base md:text-lg lg:max-w-none">
+              <ul className="max-w-4xl space-y-3.5 text-sm leading-6 text-brand-maroon/90 sm:space-y-4 sm:text-base sm:leading-7 md:text-lg md:leading-8 lg:max-w-none">
                 {missionPoints.map((point) => (
                   <li key={point} className="flex items-start gap-3">
                     <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-brand-maroon sm:mt-2.5" />
