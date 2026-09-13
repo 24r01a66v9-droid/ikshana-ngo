@@ -1,16 +1,29 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { Palette, PenTool, Image as ImageIcon, Heart, ShieldCheck, X, Award, ArrowRight, Upload, Trash2, Camera } from "lucide-react";
+import {
+  CheckCircle2,
+  PenTool,
+  Image as ImageIcon,
+  Heart,
+  HandCoins,
+  ShieldCheck,
+  Umbrella,
+  CloudRain,
+  Users,
+  X,
+  Award,
+  Upload,
+  Camera,
+  CalendarDays,
+  Tag,
+  Images,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { buildAuthRequestInit } from "../auth/fetchWithAuth";
 import { useAuth } from "../context/AuthContext";
-
-interface EventPhoto {
-  id: string;
-  url: string;
-  title?: string;
-  caption?: string;
-  is_featured: boolean;
-}
+import { useFeedback } from "./ui/feedback";
 
 interface Activity {
   name: string;
@@ -19,7 +32,8 @@ interface Activity {
 }
 
 interface Event {
-  id?: string;
+  id?: number | string;
+  event_date?: string | null;
   title: string;
   date: string;
   occasion: string;
@@ -49,22 +63,57 @@ function getActivityIcon(icon: unknown) {
         return Award;
       case "imageicon":
         return ImageIcon;
+      case "handcoins":
+        return HandCoins;
+      case "umbrella":
+        return Umbrella;
+      case "cloudrain":
+        return CloudRain;
+      case "users":
+        return Users;
+      // "palette" kept for backward compatibility with any activities saved
+      // earlier under that key — it now maps to a plain checkmark instead of
+      // the paint-palette icon, which looked like a cookie at small sizes.
       case "palette":
       default:
-        return Palette;
+        return CheckCircle2;
     }
   }
 
-  return Palette;
+  return CheckCircle2;
+}
+
+function getDisplayActivityIcon(eventTitle: string, activityName: string) {
+  const normalizedEvent = eventTitle.trim().toLowerCase();
+  const normalizedActivity = activityName.trim().toLowerCase();
+
+  // Keep the three meaningful icons for the "Go with the Flow" initiative.
+  // All other events use a simple checkmark for a consistent visual language.
+  if (normalizedEvent === "go with the flow") {
+    if (normalizedActivity === "awareness & education") return ShieldCheck;
+    if (normalizedActivity === "donation drive") return Heart;
+    if (normalizedActivity === "community engagement") return Users;
+  }
+
+  return CheckCircle2;
 }
 
 function normalizeActivities(activities: unknown): Activity[] {
   if (Array.isArray(activities)) {
-    return activities.map((activity: any) => ({
-      name: typeof activity?.name === "string" ? activity.name : "",
-      icon: getActivityIcon(activity?.icon),
-      description: typeof activity?.description === "string" ? activity.description : "",
-    }));
+    return activities
+      .map((activity: any) => {
+        const name = typeof activity?.name === "string" ? activity.name.trim() : "";
+        const description = typeof activity?.description === "string" ? activity.description.trim() : "";
+        return {
+          name,
+          icon: getActivityIcon(activity?.icon),
+          // Older records sometimes stored the activity name as its own
+          // description. Treat that as an empty description so editing does
+          // not turn "Name" into "Name: Name" and then repeat the value.
+          description: description === name ? "" : description,
+        };
+      })
+      .filter((activity) => activity.name || activity.description);
   }
 
   if (typeof activities === "string") {
@@ -72,54 +121,104 @@ function normalizeActivities(activities: unknown): Activity[] {
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((activityLine) => ({
-        name: activityLine,
-        icon: Palette,
-        description: activityLine,
-      }));
+      .map((activityLine) => {
+        const separator = activityLine.indexOf(":");
+        if (separator > 0) {
+          const name = activityLine.slice(0, separator).trim();
+          const description = activityLine.slice(separator + 1).trim();
+          return {
+            name,
+            icon: CheckCircle2,
+            description: description === name ? "" : description,
+          };
+        }
+        return { name: activityLine, icon: CheckCircle2, description: "" };
+      });
   }
 
   return [];
 }
 
+function formatDateForEvent(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value;
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (!Number.isFinite(date.getTime())) return value;
+
+  const monthName = date.toLocaleString("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  });
+  const dayNumber = Number(day);
+  const suffix =
+    dayNumber % 10 === 1 && dayNumber !== 11
+      ? "st"
+      : dayNumber % 10 === 2 && dayNumber !== 12
+        ? "nd"
+        : dayNumber % 10 === 3 && dayNumber !== 13
+          ? "rd"
+          : "th";
+
+  return `${monthName} ${dayNumber}${suffix}, ${year}`;
+}
+
+function getDatePickerValue(value: string) {
+  const match = value.match(
+    /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})$/i,
+  );
+  if (!match) return "";
+
+  const months: Record<string, string> = {
+    january: "01",
+    february: "02",
+    march: "03",
+    april: "04",
+    may: "05",
+    june: "06",
+    july: "07",
+    august: "08",
+    september: "09",
+    october: "10",
+    november: "11",
+    december: "12",
+  };
+
+  const month = months[match[1].toLowerCase()];
+  const day = String(Number(match[2])).padStart(2, "0");
+
+  return `${match[3]}-${month}-${day}`;
+}
+
+function eventMatchKey(event: Pick<Event, "title" | "date">) {
+  return `${String(event.title || "").trim().toLowerCase()}::${String(event.date || "").trim().toLowerCase()}`;
+}
+
+// Cover photo + count for an event, looked up from the Team Archive by
+// matching title (case-insensitive). This is the *only* connection between
+// the two pages now — Events no longer stores or uploads its own photos, it
+// just reads whatever's already in the Team Archive for a matching title.
+type ArchiveMatch = { url: string; count: number };
+
+// Keep the event photo click behavior: clicking a cover photo opens the
+// matching event in Team Archive, where the full photo collection can be viewed.
+const TEAM_ARCHIVE_PATH = "/gallery";
+
 export default function PastEvents() {
   const { user } = useAuth();
+  const { toast, confirm } = useFeedback();
   const normalizedRole = user?.role?.toLowerCase();
   const isAdmin = Boolean(
     normalizedRole === "admin" ||
     (user?.email && ADMIN_EMAILS.includes(user.email))
   );
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [eventPhotos, setEventPhotos] = useState<EventPhoto[]>([]);
-  const [apiBase, setApiBase] = useState<string | null>(null);
-  const [loadingPhotos, setLoadingPhotos] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
-  const [uploadingMultiple, setUploadingMultiple] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [uploadCaptions, setUploadCaptions] = useState<string[]>(["", "", ""]);
-  const [editedEvents, setEditedEvents] = useState<Record<string, Event>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const saved = window.localStorage.getItem("ikshana_edited_events");
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-  const [deletedEventIds, setDeletedEventIds] = useState<string[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = window.localStorage.getItem("ikshana_deleted_events");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+
+  const [archiveByTitle, setArchiveByTitle] = useState<Record<string, ArchiveMatch>>({});
   const [showAddEventForm, setShowAddEventForm] = useState(false);
   const [serverEvents, setServerEvents] = useState<Event[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [newEvent, setNewEvent] = useState({
     title: "",
     date: "",
@@ -128,106 +227,46 @@ export default function PastEvents() {
     acknowledgments: "",
     activities: "",
   });
-  const [newEventUploadFile, setNewEventUploadFile] = useState<File | null>(null);
-  const [newEventUploadCaption, setNewEventUploadCaption] = useState("");
-  const [showUploadOnOpen, setShowUploadOnOpen] = useState(false);
-  const newEventFileRef = useRef<HTMLInputElement>(null);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [editingActivities, setEditingActivities] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editingOriginalKey, setEditingOriginalKey] = useState<string | null>(null);
+  const [editingOriginalTitle, setEditingOriginalTitle] = useState<string | null>(null);
+  const [editingOriginalDate, setEditingOriginalDate] = useState<string | null>(null);
 
-  const generateUuid = () => {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-      return crypto.randomUUID();
-    }
-    return `event-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString().slice(-4)}`;
-  };
 
-  const normalizeId = (text: string, index: number) =>
-    `${text
-      .toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^a-z0-9-]/g, "")}-${index}`;
 
-  const events: Event[] = [
-    {
-      title: "Donation Drive for World Cancer Awareness Day",
-      date: "November 9th, 2024",
-      occasion: "Cancer Awareness & Medical Support",
-      description: "Team Ikshana has conducted a donation drive to support Bommu Lakhmi Garu, who was battling a serious pulmonary disease. The drive raised ₹40,000 through campus donation booths while spreading awareness about cancer and related diseases.",
-      activities: [
-        { name: "₹40,000 Raised", icon: Heart, description: "" },
-        { name: "Campus Donation Drive", icon: Palette, description: "" },
-        { name: "Cancer Awareness", icon: ShieldCheck, description: "" },
-      ],
-      acknowledgments: "Special thanks to all students and faculty who supported the drive.",
-      image: null,
-    },
-    {
-      title: "Visit to Gundla Pochampalley",
-      date: "June 1st, 2024",
-      occasion: "Educational Awareness & Community Support",
-      description: "Our team visited Gundla Pochampalley village to promote the importance of education. Through door-to-door awareness, engaging activities, and the distribution of stationery, chocolates, and drinks, the team encouraged children to value education while bringing joy and support to the community.",
-      activities: [
-        { name: "Education Awareness", icon: Heart, description: "" },
-        { name: "Community Outreach", icon: Palette, description: "" },
-        { name: "Stationery Distribution", icon: ShieldCheck, description: "" },
-      ],
-      acknowledgments: "Thanks to all volunteers who supported this outreach.",
-      image: null,
-    },
-    {
-      title: "Seasons of Care",
-      date: "June 6th, 2026",
-      occasion: "Weather Support & Community Relief",
-      description: "We conducted Seasons of Care, a seasonal donation drive in Hyderabad, supporting vulnerable communities affected by extreme heat and rain. The team distributed umbrellas, raincoats, and essential items, spreading kindness, comfort, and hope.",
-      activities: [
-        { name: "Weather Relief", icon: Heart, description: "" },
-        { name: "Umbrella & Raincoat Distribution", icon: Palette, description: "" },
-        { name: "Community Support", icon: ShieldCheck, description: "" },
-      ],
-      acknowledgments: "Thanks to all who contributed to Seasons of Care.",
-      image: null,
-    },
-    {
-      title: "Go with the Flow",
-      date: "August 30th, 2018",
-      occasion: "Menstrual Health Awareness & Community Support",
-      description: "Team IKSHANA hosted \"Go With The Flow\" to break menstrual health taboos and promote open conversations around menstruation. The initiative included the donation of sanitary napkins to girl orphanages, supporting menstrual hygiene, dignity, and well-being.",
-      activities: [
-        {
-          name: "Awareness & Education",
-          icon: ShieldCheck,
-          description: "Hosted open discussions about menstrual health, dispelling myths and misconceptions about menstruation while promoting a positive and informed outlook on this natural process."
-        },
-        {
-          name: "Donation Drive",
-          icon: Heart,
-          description: "Organized a collection drive for sanitary napkins and other menstrual hygiene products to donate to girl orphanages, addressing the crucial need for hygienic menstrual product access."
-        },
-        {
-          name: "Community Engagement",
-          icon: Palette,
-          description: "Encouraged participants to contribute to the cause, emphasizing how small acts of kindness can profoundly impact the lives of young girls, ensuring their dignity, comfort, and overall well-being."
-        },
-        {
-          name: "Breaking Stigma",
-          icon: Award,
-          description: "Worked to destigmatize menstruation and create meaningful conversations around menstrual health, exemplifying Team IKSHANA's commitment to addressing fundamental social issues with compassion and inclusivity."
+  // Supabase is the single source of truth for events. Keep the UI ordered by
+  // the actual event date, not by created_at or by the order returned from storage.
+  const mergedEvents = serverEvents
+    .filter((event) => event?.id !== undefined && event?.id !== null)
+    .map((event) => ({
+      ...event,
+      activities: normalizeActivities(event.activities),
+    }))
+    .sort((a, b) => {
+      const parseSortableDate = (event: Event) => {
+        if (event.event_date) {
+          const time = new Date(`${event.event_date}T00:00:00Z`).getTime();
+          if (Number.isFinite(time)) return time;
         }
-      ],
-      acknowledgments: "Special thanks to all Team IKSHANA members and volunteers who dedicated their efforts to make this important initiative a success. We extend our gratitude to everyone who participated in discussions, contributed to the donation drive, and helped break societal taboos around menstrual health. Together, we've demonstrated that compassion and awareness can transform lives and foster a more inclusive community.",
-      image: null
-    }
-  ];
 
-  const allEvents = [...events, ...serverEvents];
+        const match = String(event.date || '').match(
+          /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})$/i,
+        );
+        if (!match) return 0;
 
-  const mergedEvents = allEvents.map((event, index) => ({
-    ...event,
-    id: event.id || normalizeId(event.title, index),
-    activities: normalizeActivities(event.activities),
-  }));
+        const months: Record<string, number> = {
+          january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+          july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+        };
+        const month = months[match[1].toLowerCase()];
+        const parsed = new Date(Date.UTC(Number(match[3]), month, Number(match[2])));
+        return Number.isFinite(parsed.getTime()) ? parsed.getTime() : 0;
+      };
+
+      return parseSortableDate(b) - parseSortableDate(a);
+    });
+
   useEffect(() => {
     const loadEvents = async () => {
       try {
@@ -247,75 +286,46 @@ export default function PastEvents() {
     loadEvents();
   }, []);
 
+  // Pull the Team Archive's photos once and index them by title so each
+  // event card can show a real cover photo + count without maintaining its
+  // own separate copy of the images.
   useEffect(() => {
-    if (!selectedEvent) return;
-    fetchEventPhotos(selectedEvent.title);
-  }, [selectedEvent]);
+    (async () => {
+      try {
+        const response = await fetch("/api/photos?category=gallery");
+        if (!response.ok) return;
+        const rows = await response.json();
+        if (!Array.isArray(rows)) return;
 
-  const fetchEventPhotos = async (title: string) => {
-    try {
-      setLoadingPhotos(true);
-      setPhotoError(null);
-      const base = apiBase ?? '';
-      const photosUrl = `${base}/api/photos?sub_category=${encodeURIComponent(title)}`;
-      const response = await fetch(photosUrl);
-      if (!response.ok) throw new Error("Failed to load photos");
-      const data = await response.json();
-      setEventPhotos(Array.isArray(data) ? data : []);
-    } catch (error) {
-      setPhotoError("Unable to load event gallery right now.");
-    } finally {
-      setLoadingPhotos(false);
-    }
-  };
-
-  // Discover a working backend base URL (probes common dev ports). Caches result in state.
-  useEffect(() => {
-    if (apiBase !== null) return;
-    let cancelled = false;
-
-    const timeout = (ms: number) => new Promise((res) => setTimeout(res, ms));
-
-    const probe = async () => {
-      if (typeof window === 'undefined') {
-        setApiBase('');
-        return;
-      }
-      const proto = window.location.protocol;
-      const host = window.location.hostname;
-      const ports = [window.location.port || '3000', '3000', '3001', '3002', '3003', '3004'];
-
-      for (const p of ports) {
-        try {
-          const url = `${proto}//${host}:${p}/health`;
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 1500);
-          const resp = await fetch(url, { signal: controller.signal, credentials: 'include' }).catch(() => null);
-          clearTimeout(timer);
-          if (resp && resp.ok) {
-            const text = await resp.text().catch(() => '');
-            if (!cancelled) {
-              setApiBase(`${proto}//${host}:${p}`);
-              return;
+        const byKey: Record<string, { url: string; order: number; count: number }> = {};
+        rows.forEach((row: any) => {
+          const key = String(row.title || "").trim().toLowerCase();
+          if (!key) return;
+          const order = Number(row.photo_order ?? 0);
+          if (!byKey[key]) {
+            byKey[key] = { url: row.url, order, count: 1 };
+          } else {
+            byKey[key].count += 1;
+            if (order < byKey[key].order) {
+              byKey[key].url = row.url;
+              byKey[key].order = order;
             }
           }
-        } catch (e) {
-          // ignore and try next
-        }
-        await timeout(100);
+        });
+
+        const cleaned: Record<string, ArchiveMatch> = {};
+        Object.entries(byKey).forEach(([key, value]) => {
+          cleaned[key] = { url: value.url, count: value.count };
+        });
+        setArchiveByTitle(cleaned);
+      } catch (error) {
+        console.error("Failed to load Team Archive photos for events", error);
       }
-
-      // fallback to empty (relative) so app still attempts relative calls
-      if (!cancelled) setApiBase('');
-    };
-
-    probe();
-    return () => { cancelled = true; };
-  }, [apiBase]);
+    })();
+  }, []);
 
   const handleShowAddEvent = () => {
     setShowAddEventForm(true);
-    setSaveMessage(null);
   };
 
   const handleNewEventChange = (field: string, value: string) => {
@@ -335,14 +345,32 @@ export default function PastEvents() {
       activities: normalizeActivities(editingActivities),
     };
 
-    // Optimistically save locally
-    setEditedEvents((prev) => ({ ...prev, [editingEvent.id!]: updatedEvent }));
+    const currentKey = eventMatchKey(editingEvent);
+    const originalTitle = String(editingOriginalTitle || "").trim().toLowerCase();
+    const persistedEvent =
+      serverEvents.find((event) => /^\d+$/.test(String(event.id)) && String(event.id) === String(editingEvent.id)) ||
+      (editingOriginalKey
+        ? serverEvents.find((event) => eventMatchKey(event) === editingOriginalKey)
+        : undefined) ||
+      serverEvents.find((event) => eventMatchKey(event) === currentKey) ||
+      (originalTitle
+        ? serverEvents.find((event) => String(event.title || "").trim().toLowerCase() === originalTitle)
+        : undefined);
 
-    // If this event exists on the server, persist the change
+    const persistedId = persistedEvent?.id;
+
+    if (!persistedId || !/^\d+$/.test(String(persistedId))) {
+      toast(
+        "This event is not yet stored in Supabase. Add/import the event there before editing it.",
+        { tone: "error" },
+      );
+      return;
+    }
+
     try {
-      const isServerEvent = serverEvents.some((ev) => String(ev.id) === String(editingEvent.id));
-      if (isServerEvent && editingEvent.id) {
-        const resp = await fetch(`/api/events/${editingEvent.id}`, buildAuthRequestInit({
+      const resp = await fetch(
+        `/api/events/${encodeURIComponent(String(persistedId))}`,
+        buildAuthRequestInit({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -352,41 +380,49 @@ export default function PastEvents() {
             description: updatedEvent.description,
             acknowledgments: updatedEvent.acknowledgments,
             activities: updatedEvent.activities,
+            originalTitle: editingOriginalTitle,
+            originalDate: editingOriginalDate,
           }),
-        }));
+        }),
+      );
 
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => null);
-          throw new Error(err?.error || `Failed to update event (${resp.status})`);
-        }
-
-        const saved = await resp.json().catch(() => null);
-        // Replace serverEvents entry with returned value when possible
-        if (saved) {
-          setServerEvents((prev) => prev.map((ev) => (String(ev.id) === String(editingEvent.id) ? { ...ev, ...(saved || {}) } : ev)));
-        }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.error || `Failed to update event (${resp.status})`);
       }
-      setSaveMessage("Event saved");
+
+      const saved = await resp.json().catch(() => null);
+      const savedEvent = saved?.event || saved;
+
+      if (!savedEvent?.id) {
+        throw new Error("The server did not return the updated event.");
+      }
+
+      setServerEvents((prev) =>
+        prev.map((ev) =>
+          String(ev.id) === String(persistedId)
+            ? { ...ev, ...savedEvent }
+            : ev,
+        ),
+      );
+
+      toast("Event updated successfully.", { tone: "success" });
+      setEditingEvent(null);
+      setEditingOriginalKey(null);
+      setEditingOriginalTitle(null);
+      setEditingOriginalDate(null);
+      setEditingActivities("");
     } catch (err: any) {
       console.error("Failed to persist edited event:", err);
-      setSaveMessage("Failed to save event to server");
-    } finally {
-      // persist local edits to localStorage for offline fallback (use latest local state)
-      try {
-        const latestLocal = { ...(editedEvents || {}), [editingEvent.id!]: updatedEvent };
-        window.localStorage.setItem("ikshana_edited_events", JSON.stringify(latestLocal));
-        setEditedEvents(latestLocal);
-      } catch (e) {}
-
-      setEditingEvent(null);
-      setEditingActivities("");
+      toast(err?.message || "Failed to save the event.", { tone: "error" });
     }
   };
 
   const createEvent = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!newEvent.title.trim() || !newEvent.date.trim() || !newEvent.description.trim()) {
-      alert("Please provide at least a title, date, and description for the new event.");
+      toast("An event needs at least a title, a date and a description.", { tone: "error" });
       return;
     }
 
@@ -399,143 +435,155 @@ export default function PastEvents() {
       activities: normalizeActivities(newEvent.activities),
     };
 
-    setServerEvents((prev) => [newRecord, ...prev]);
-    // If admin attached a photo while creating this event, upload it to the event gallery
-    if (isAdmin && newEventUploadFile) {
-      try {
-        const formData = new FormData();
-        formData.append("file", newEventUploadFile);
-        formData.append("title", newEventUploadCaption || newRecord.title);
-        formData.append("category", "event");
-        formData.append("sub_category", newRecord.title);
-        formData.append("date", newRecord.date || new Date().toLocaleDateString());
-
-        const resp = await fetch("/api/photos", buildAuthRequestInit({
+    try {
+      const resp = await fetch(
+        "/api/events",
+        buildAuthRequestInit({
           method: "POST",
-          body: formData,
-        }));
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newRecord),
+        }),
+      );
 
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => null);
-          console.error("New event photo upload failed", err);
-        }
-      } catch (err) {
-        console.error("Failed to upload new event photo", err);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.error || `Failed to create event (${resp.status})`);
       }
-    }
 
-    setShowAddEventForm(false);
-    setNewEvent({ title: "", date: "", occasion: "", description: "", acknowledgments: "", activities: "" });
-    setNewEventUploadFile(null);
-    setNewEventUploadCaption("");
+      const saved = await resp.json().catch(() => null);
+      const savedEvent = saved?.event || saved;
+
+      if (!savedEvent?.id) {
+        throw new Error("The server did not return the new event.");
+      }
+
+      setServerEvents((prev) => [savedEvent, ...prev]);
+      setShowAddEventForm(false);
+      setNewEvent({
+        title: "",
+        date: "",
+        occasion: "",
+        description: "",
+        acknowledgments: "",
+        activities: "",
+      });
+      toast("Event created successfully.", { tone: "success" });
+    } catch (err: any) {
+      console.error("Failed to create event:", err);
+      toast(err?.message || "Failed to create the event.", { tone: "error" });
+    }
   };
 
   const openEditEvent = (event: Event) => {
     if (!isAdmin) return;
+    setEditingOriginalKey(eventMatchKey(event));
+    setEditingOriginalTitle(event.title);
+    setEditingOriginalDate(event.date);
     setEditingEvent(event);
-    setEditingActivities(event.activities.map((activity) => `${activity.name}: ${activity.description}`).join("\n"));
+    setEditingActivities(
+      event.activities
+        .map((activity) => {
+          const name = activity.name.trim();
+          const description = activity.description.trim();
+          return description && description !== name ? `${name}: ${description}` : name;
+        })
+        .filter(Boolean)
+        .join("\n"),
+    );
   };
 
-  const deleteEvent = async (eventId: string) => {
+  const deleteEvent = async (event: Event) => {
     if (!isAdmin) return;
 
-    const isServerEvent = serverEvents.some((ev) => String(ev.id) === String(eventId));
+    const eventTitleKey = String(event.title || "").trim().toLowerCase();
+    const persistedEvent =
+      serverEvents.find((item) => /^\d+$/.test(String(item.id)) && String(item.id) === String(event.id)) ||
+      serverEvents.find((item) => eventMatchKey(item) === eventMatchKey(event)) ||
+      serverEvents.find((item) => String(item.title || "").trim().toLowerCase() === eventTitleKey);
+    const persistedId = persistedEvent?.id;
 
-    if (isServerEvent) {
-      try {
-        const resp = await fetch(`/api/events/${eventId}`, buildAuthRequestInit({ method: "DELETE" }));
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => null);
-          throw new Error(err?.error || `Failed to delete event (${resp.status})`);
-        }
-      } catch (err: any) {
-        console.error("Failed to delete event on server:", err);
-        alert(err?.message || "Failed to delete event on server");
-        return;
-      }
+    if (!persistedId || !/^\d+$/.test(String(persistedId))) {
+      toast(
+        "This event is not yet stored in Supabase, so it cannot be deleted permanently.",
+        { tone: "error" },
+      );
+      return;
     }
 
-    setDeletedEventIds((prev) => [...prev, eventId]);
-    setServerEvents((prev) => prev.filter((event) => String(event.id) !== String(eventId)));
-  };
+    const confirmed = await confirm({
+      title: `Delete "${event.title}"?`,
+      body: "This removes the event from the public page. Photos in Team Archive are not affected.",
+      confirmLabel: "Delete event",
+      tone: "danger",
+    });
 
-  const handleEventPhotoUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isAdmin || uploadFiles.length === 0 || !selectedEvent || uploadingMultiple) return;
+    if (!confirmed) return;
 
-    setUploadingMultiple(true);
-    
     try {
-      // Upload all selected files
-      const uploadPromises = uploadFiles.map((file, index) => {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("title", uploadCaptions[index] || selectedEvent.title);
-        formData.append("category", "event");
-        formData.append("sub_category", selectedEvent.title);
-        formData.append("date", selectedEvent.date);
+      const resp = await fetch(
+        `/api/events/${encodeURIComponent(String(persistedId))}`,
+        buildAuthRequestInit({ method: "DELETE" }),
+      );
 
-        return fetch(`${apiBase || ''}/api/photos`, buildAuthRequestInit({
-          method: "POST",
-          body: formData,
-        }));
-      });
-
-      const responses = await Promise.all(uploadPromises);
-      
-      for (const response of responses) {
-        if (!response.ok) {
-          const text = await response.text().catch(() => null);
-          console.error("Event photo upload failed", { status: response.status, statusText: response.statusText, body: text });
-          const errorData = text ? (() => {
-            try { return JSON.parse(text); } catch { return { error: text }; }
-          })() : null;
-          throw new Error(errorData?.error || `Upload failed (${response.status})`);
-        }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.error || `Failed to delete event (${resp.status})`);
       }
 
-      await fetchEventPhotos(selectedEvent.title);
-      setUploadFiles([]);
-      setUploadCaptions(["", "", ""]);
-    } catch (error) {
-      console.error("Failed to upload event photos", error);
-      const message = (error instanceof Error && error.message) ? error.message : String(error);
-      if (message.toLowerCase().includes("fetch failed") || message.toLowerCase().includes("networkerror") || message.toLowerCase().includes("failed to fetch")) {
-        alert("Upload failed: network error communicating with the server. Ensure the dev server is running (npm --prefix ./hahaaaaa-main run dev) and try again. See console for details.");
-      } else {
-        alert(`Upload failed: ${message}`);
-      }
-    } finally {
-      setUploadingMultiple(false);
+      setServerEvents((prev) =>
+        prev.filter((item) => String(item.id) !== String(persistedId)),
+      );
+
+      toast("Event deleted successfully.", { tone: "success" });
+    } catch (err: any) {
+      console.error("Failed to delete event:", err);
+      toast(err?.message || "Failed to delete the event.", { tone: "error" });
     }
   };
 
   return (
-    <section id="past-events" className="pt-32 md:pt-40 pb-24 px-6 bg-brand-cream min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-6">
-          <h1 className="text-5xl md:text-7xl font-serif text-brand-maroon leading-tight">
-            Our Featured Events & Initiatives
-          </h1>
-        </div>
-
-        {isAdmin && (
-          <div className="mb-6 flex justify-center">
-            <button
-              onClick={handleShowAddEvent}
-              className="inline-flex items-center gap-2 rounded-full bg-brand-maroon px-8 py-4 text-[10px] font-bold uppercase tracking-[0.3em] text-white shadow-lg shadow-brand-maroon/20 transition-all hover:bg-stone-900"
-            >
-              <Camera size={16} />
-              Add New Event
-            </button>
+    <section
+      id="past-events"
+      className="min-h-screen bg-[#fffcfc] px-3 pb-24 pt-24 sm:px-6 sm:pt-28 lg:px-8 lg:pt-28 xl:px-10 2xl:px-12"
+    >
+      <motion.div
+        initial={{ y: 18, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="mx-auto flex max-w-7xl flex-col rounded-[1.75rem] border border-brand-maroon/10 bg-white p-3 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.12)] sm:p-6 lg:p-8 xl:p-10"
+      >
+        <header className="px-1 pb-4 pt-2 sm:pb-5 sm:pt-1">
+          <div className="mx-auto flex max-w-5xl flex-col items-center text-center">
+            <h1 className="font-serif text-[1.75rem] font-medium leading-tight tracking-[-0.03em] text-brand-maroon sm:text-4xl md:text-5xl lg:text-[3.5rem]">
+              Our{" "}
+              <span className="relative inline-block italic">
+                Events
+                <span
+                  aria-hidden="true"
+                  className="absolute -bottom-[0.08em] left-0 h-[0.06em] w-full rounded-full bg-brand-maroon/20"
+                />
+              </span>{" "}
+              &amp; Initiatives
+            </h1>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleShowAddEvent}
+                className="focus-ring mt-5 inline-flex min-h-11 items-center gap-2.5 rounded-full bg-brand-maroon px-6 text-label text-white shadow-rest transition-all duration-200 hover:-translate-y-0.5 hover:bg-stone-900 hover:shadow-lg sm:mt-6"
+              >
+                <Camera size={16} />
+                Add New Event
+              </button>
+            )}
           </div>
-        )}
+        </header>
 
-        {showAddEventForm && (
-          <form onSubmit={createEvent} className="mb-16 rounded-[2rem] border border-stone-200 bg-white p-8 shadow-xl">
+        <div className="mt-2">
+          {showAddEventForm && (
+          <form onSubmit={createEvent} className="mb-8 rounded-[2rem] border border-brand-maroon/10 bg-white p-6 shadow-xl sm:mb-10 sm:p-8">
             <div className="mb-6 flex items-center justify-between">
               <h3 className="text-2xl font-serif text-brand-maroon">Add New Event</h3>
-              <button type="button" onClick={() => setShowAddEventForm(false)} className="text-stone-400 hover:text-brand-maroon">
+              <button type="button" onClick={() => setShowAddEventForm(false)} className="text-stone-500 hover:text-brand-maroon">
                 <X size={20} />
               </button>
             </div>
@@ -555,11 +603,13 @@ export default function PastEvents() {
               <label className="block">
                 <span className="text-sm text-brand-maroon uppercase tracking-[0.2em] font-bold">Date</span>
                 <input
-                  type="text"
-                  value={newEvent.date}
-                  onChange={(e) => handleNewEventChange("date", e.target.value)}
+                  type="date"
+                  value={getDatePickerValue(newEvent.date)}
+                  onChange={(e) =>
+                    handleNewEventChange("date", formatDateForEvent(e.target.value))
+                  }
                   className="mt-2 w-full rounded-3xl border border-stone-200 px-4 py-3 text-sm text-brand-maroon focus:outline-none focus:border-brand-maroon"
-                  placeholder="e.g. July 20th, 2025"
+                  aria-label="Choose event date"
                 />
               </label>
             </div>
@@ -599,42 +649,6 @@ export default function PastEvents() {
               />
             </label>
 
-            {isAdmin && (
-              <div className="mt-6">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-maroon">Attach Cover Photo (optional)</p>
-                <div className="mt-3 flex items-center gap-4">
-                  <div
-                    className="flex cursor-pointer items-center gap-3 rounded-[1rem] border border-dashed border-stone-300 p-3 text-center transition hover:border-brand-maroon/40"
-                    onClick={() => newEventFileRef.current?.click()}
-                  >
-                    {newEventUploadFile ? (
-                      <img src={URL.createObjectURL(newEventUploadFile)} alt="preview" className="h-20 w-20 rounded-md object-cover" />
-                    ) : (
-                      <Upload size={20} className="text-stone-400" />
-                    )}
-                    <input
-                      ref={newEventFileRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => e.target.files?.[0] && setNewEventUploadFile(e.target.files[0])}
-                    />
-                    <div>
-                      <p className="text-sm text-brand-maroon/70">Click to attach an event photo</p>
-                      <p className="text-xs text-stone-400">Will be saved to the event gallery after creating the event</p>
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Caption (optional)"
-                    value={newEventUploadCaption}
-                    onChange={(e) => setNewEventUploadCaption(e.target.value)}
-                    className="flex-1 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-brand-maroon outline-none focus:border-brand-maroon"
-                  />
-                </div>
-              </div>
-            )}
-
             <label className="mt-6 block">
               <span className="text-sm text-brand-maroon uppercase tracking-[0.2em] font-bold">Activities</span>
               <textarea
@@ -646,6 +660,12 @@ export default function PastEvents() {
               />
             </label>
 
+            <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-brand-maroon/70">
+              <Images size={14} className="mt-0.5 shrink-0" />
+              Photos aren't attached here — add them to Team Archive with the same title as this event and
+              they'll show up on this card automatically.
+            </p>
+
             <button
               type="submit"
               className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand-maroon px-8 py-4 text-[10px] font-bold uppercase tracking-[0.3em] text-white transition-all hover:bg-stone-900"
@@ -655,11 +675,35 @@ export default function PastEvents() {
           </form>
         )}
 
-        {editingEvent && (
-          <form onSubmit={saveEditedEvent} className="mb-16 rounded-[2rem] border border-stone-200 bg-white p-8 shadow-xl">
+
+        {eventsLoading && (
+          <p className="mb-8 text-center text-sm text-brand-maroon/70">Loading events…</p>
+        )}
+        {eventsError && (
+          <p className="mb-8 text-center text-sm text-brand-maroon/70">{eventsError}</p>
+        )}
+
+        <div className="space-y-7 sm:space-y-8">
+          {mergedEvents.map((event) => {
+            const isEditing =
+              editingEvent !== null &&
+              String(editingEvent.id) === String(event.id);
+
+            if (isEditing) {
+              return (
+                <motion.div
+                  key={`edit-${String(event.id)}`}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                >
+          <form
+            onSubmit={saveEditedEvent}
+            className="rounded-[2rem] border border-brand-maroon/10 bg-white p-6 shadow-xl sm:p-8"
+          >
             <div className="mb-6 flex items-center justify-between">
               <h3 className="text-2xl font-serif text-brand-maroon">Edit Event</h3>
-              <button type="button" onClick={() => { setEditingEvent(null); setEditingActivities(""); }} className="text-stone-400 hover:text-brand-maroon">
+              <button type="button" onClick={() => { setEditingEvent(null); setEditingOriginalKey(null); setEditingOriginalTitle(null); setEditingOriginalDate(null); setEditingActivities(""); }} className="text-stone-500 hover:text-brand-maroon">
                 <X size={20} />
               </button>
             </div>
@@ -679,11 +723,13 @@ export default function PastEvents() {
               <label className="block">
                 <span className="text-sm text-brand-maroon uppercase tracking-[0.2em] font-bold">Date</span>
                 <input
-                  type="text"
-                  value={editingEvent.date}
-                  onChange={(e) => handleEditEventChange("date", e.target.value)}
+                  type="date"
+                  value={getDatePickerValue(editingEvent.date)}
+                  onChange={(e) =>
+                    handleEditEventChange("date", formatDateForEvent(e.target.value))
+                  }
                   className="mt-2 w-full rounded-3xl border border-stone-200 px-4 py-3 text-sm text-brand-maroon focus:outline-none focus:border-brand-maroon"
-                  placeholder="e.g. July 20th, 2025"
+                  aria-label="Choose event date"
                 />
               </label>
             </div>
@@ -734,211 +780,189 @@ export default function PastEvents() {
               />
             </label>
 
-            <div className="mt-6 flex items-center gap-4">
+            <div className="mt-4 flex items-center gap-4 border-t border-brand-maroon/[0.08] pt-4 sm:mt-5 sm:pt-4">
               <button
                 type="submit"
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-brand-maroon px-8 py-4 text-[10px] font-bold uppercase tracking-[0.3em] text-white transition-all hover:bg-stone-900"
               >
                 Save Changes
               </button>
-              <button type="button" onClick={() => { setEditingEvent(null); setEditingActivities(""); }} className="text-brand-maroon/70">Cancel</button>
-              {saveMessage && <span className="text-sm text-brand-maroon/70">{saveMessage}</span>}
+              <button type="button" onClick={() => { setEditingEvent(null); setEditingOriginalKey(null); setEditingOriginalTitle(null); setEditingOriginalDate(null); setEditingActivities(""); }} className="text-brand-maroon/70">Cancel</button>
             </div>
           </form>
-        )}
+                </motion.div>
+              );
+            }
 
-        <div className="space-y-20">
-          {mergedEvents.map((event, eventIdx) => (
-            <div key={`${event.title}-${eventIdx}`} className="rounded-[2.5rem] border border-stone-200/70 bg-white p-8 shadow-[0_25px_80px_-40px_rgba(120,37,30,0.32)] sm:p-10 lg:p-12">
-              <div className="flex flex-col gap-10 lg:flex-row lg:items-start lg:justify-between">
-                <div className="max-w-2xl">
-                  <div className="mb-4 flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon/50">
-                    <span>{event.date}</span>
-                    <span className="rounded-full bg-brand-maroon/10 px-3 py-1 text-[9px] text-brand-maroon">
-                      {event.occasion}
-                    </span>
-                  </div>
-                  <h2 className="text-3xl font-serif text-brand-maroon sm:text-4xl">{event.title}</h2>
-                  <p className="mt-6 text-lg leading-relaxed text-brand-maroon/80">{event.description}</p>
+            const archiveMatch = archiveByTitle[event.title.trim().toLowerCase()];
 
-                  <button
-                    onClick={() => setSelectedEvent(event)}
-                    className="mt-8 inline-flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon transition-all hover:gap-4"
-                  >
-                    View Event Gallery
-                    <ArrowRight size={14} />
-                  </button>
+            return (
+              <motion.div
+                key={String(event.id)}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ duration: 0.4 }}
+                className="group relative overflow-hidden rounded-[2rem] border border-brand-maroon/12 bg-white shadow-[0_24px_70px_-34px_rgba(120,37,30,0.26)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_32px_90px_-34px_rgba(120,37,30,0.32)] sm:rounded-[2.35rem]"
+              >
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-0 top-0 z-20 h-1 bg-gradient-to-r from-brand-maroon/80 via-brand-maroon/35 to-transparent"
+                />
 
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedEvent(event); setShowUploadOnOpen(true); }}
-                      className="ml-4 mt-8 inline-flex items-center gap-2 rounded-full border border-stone-300 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon transition-all hover:border-brand-maroon hover:bg-brand-maroon hover:text-white"
+                <div className="grid lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] lg:items-stretch">
+                  {/* Desktop: the grid row is sized by the content column, so the
+                      image is exactly the same height as the content. Mobile keeps
+                      a controlled image ratio so cards remain compact. */}
+                  <div className="relative min-h-0 bg-[#fffaf7] p-3 sm:p-4 lg:p-5">
+                    <Link
+                      to={archiveMatch ? `${TEAM_ARCHIVE_PATH}?event=${encodeURIComponent(event.title)}` : "#"}
+                      onClick={(e) => {
+                        if (!archiveMatch) e.preventDefault();
+                      }}
+                      onPointerEnter={() => {
+                        if (archiveMatch?.url) {
+                          const img = new Image();
+                          img.decoding = "async";
+                          img.src = archiveMatch.url;
+                        }
+                      }}
+                      onTouchStart={() => {
+                        if (archiveMatch?.url) {
+                          const img = new Image();
+                          img.src = archiveMatch.url;
+                        }
+                      }}
+                      className={`relative block aspect-[4/3] overflow-hidden rounded-[1.55rem] border border-brand-maroon/12 bg-stone-100 shadow-[0_14px_38px_-22px_rgba(120,37,30,0.45)] lg:absolute lg:inset-5 lg:aspect-auto ${
+                        archiveMatch ? "cursor-pointer" : "cursor-default"
+                      }`}
+                      aria-label={archiveMatch ? `View photos for ${event.title}` : undefined}
                     >
-                      <Camera size={14} />
-                      Add Photos
-                    </button>
-                  )}
-
-                  {isAdmin && (
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => openEditEvent(event)}
-                        className="rounded-full bg-brand-maroon px-5 py-3 text-[10px] font-bold uppercase tracking-[0.3em] text-white transition-all hover:bg-stone-900"
-                      >
-                        Edit Event
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteEvent(event.id!)}
-                        className="rounded-full border border-stone-300 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon transition-all hover:border-brand-maroon hover:bg-brand-maroon hover:text-white"
-                      >
-                        Delete Event
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-[2rem] border border-stone-200/70 bg-brand-maroon/5 p-6 text-sm text-brand-maroon/80 lg:min-w-[280px]">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon/40">Highlights</p>
-                  <div className="mt-4">
-                    <p className="text-sm leading-relaxed">
-                      {(() => {
-                        const items = event.activities.slice(0, 3).map(a => a.name).filter(Boolean);
-                        if (items.length === 0) return "";
-                        return `• ${items.join(' • ')}`;
-                      })()}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {selectedEvent && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-stone-900/90 p-6 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[2.5rem] bg-brand-cream shadow-2xl"
-            >
-              <div className="flex items-start justify-between border-b border-stone-200/70 bg-white p-8">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon/40">{selectedEvent.occasion}</p>
-                  <h3 className="mt-3 text-3xl font-serif text-brand-maroon">{selectedEvent.title}</h3>
-                </div>
-                <button onClick={() => { setSelectedEvent(null); setShowUploadOnOpen(false); setUploadFiles([]); setUploadCaptions(["", "", ""]); }} className="rounded-full bg-stone-100 p-3 text-stone-500 transition-all hover:bg-brand-maroon hover:text-white">
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="max-h-[calc(90vh-180px)] overflow-y-auto p-8">
-                {/* Photo Gallery Grid */}
-                {eventPhotos.length > 0 && (
-                  <div className="mb-8">
-                    <div className={`grid gap-6 ${eventPhotos.length === 1 ? 'grid-cols-1' : eventPhotos.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                      {eventPhotos.slice(0, 3).map((photo, idx) => (
-                        <div key={idx} className="rounded-[1.25rem] overflow-hidden bg-stone-100">
-                          <img src={photo.url} alt={photo.title || selectedEvent.title} className="w-full h-48 object-cover" />
+                      {archiveMatch ? (
+                        <img
+                          src={archiveMatch.url}
+                          alt={event.title}
+                          loading="eager"
+                          decoding="async"
+                          fetchPriority="high"
+                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.025]"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-brand-maroon/55">
+                          <ImageIcon size={32} strokeWidth={1.5} />
+                          <span className="text-[10px] font-bold uppercase tracking-[0.2em]">No photos yet</span>
                         </div>
-                      ))}
+                      )}
+
+                      {archiveMatch && (
+                        <>
+                          <span className="pointer-events-none absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-white/30 bg-stone-950/65 px-3 py-1.5 text-[10px] font-semibold text-white shadow-lg backdrop-blur">
+                            <Images size={12} />
+                            {archiveMatch.count} photo{archiveMatch.count !== 1 ? "s" : ""}
+                          </span>
+                          <span className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-stone-950/55 px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-white opacity-0 shadow-lg backdrop-blur transition-opacity duration-300 group-hover:opacity-100 sm:left-4 sm:top-4">
+                            <Images size={12} />
+                            View photos
+                          </span>
+                        </>
+                      )}
+                    </Link>
+                  </div>
+
+                  {/* Content column */}
+                  <div className="relative flex min-w-0 flex-col justify-center border-t border-brand-maroon/[0.08] p-6 sm:p-8 lg:border-l lg:border-t-0 lg:p-9 xl:p-10">
+                    <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full border border-brand-maroon/[0.07]" />
+                    <div aria-hidden="true" className="pointer-events-none absolute bottom-7 right-7 hidden h-16 w-16 rounded-full border border-brand-maroon/[0.08] lg:block" />
+
+                    <div className="relative flex flex-wrap items-center gap-2">
+                      <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-brand-maroon/10 bg-brand-cream/70 px-3.5 py-2 text-[9px] font-bold uppercase tracking-[0.17em] text-brand-maroon/90 sm:text-[10px]">
+                        <CalendarDays size={13} strokeWidth={1.8} className="shrink-0" />
+                        <span className="truncate">{event.date}</span>
+                      </span>
+                      {event.occasion && (
+                        <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-maroon/[0.08] px-3.5 py-2 text-[9px] font-bold uppercase tracking-[0.16em] text-brand-maroon sm:text-[10px]">
+                          <Tag size={12} strokeWidth={1.8} className="shrink-0" />
+                          <span className="truncate">{event.occasion}</span>
+                        </span>
+                      )}
                     </div>
-                  </div>
-                )}
 
-                {!eventPhotos.length && !selectedEvent.image && (
-                  <div className="mb-8 h-64 w-full rounded-[1.25rem] bg-stone-100" />
-                )}
+                    <div className="relative mt-5 h-px w-12 bg-brand-maroon/25" />
 
-                {!eventPhotos.length && selectedEvent.image && (
-                  <div className="mb-8">
-                    <img src={selectedEvent.image} alt={selectedEvent.title} className="w-full h-64 rounded-[1.25rem] object-cover" />
-                  </div>
-                )}
+                    <h2 className="relative mt-5 max-w-3xl font-serif text-[1.85rem] font-medium leading-[1.08] tracking-[-0.025em] text-brand-maroon sm:text-3xl lg:text-[2.55rem]">
+                      {event.title}
+                    </h2>
 
-                {isAdmin && showUploadOnOpen && (
-                  <form onSubmit={handleEventPhotoUpload} className="w-full bg-white rounded-lg p-6 border border-stone-200">
-                    <p className="mb-4 text-sm font-bold text-brand-maroon uppercase tracking-widest">Upload Up to 3 Images</p>
-                    <div className="space-y-4">
-                      {[0, 1, 2].map((index) => (
-                        <div key={index} className="flex items-center gap-3 p-4 bg-stone-50 rounded-lg border border-stone-200">
-                          <label className="flex items-center gap-3 cursor-pointer flex-1">
-                            <input 
-                              type="file" 
-                              accept="image/*" 
-                              onChange={(e) => {
-                                if (e.target.files?.[0]) {
-                                  const newFiles = [...uploadFiles];
-                                  newFiles[index] = e.target.files[0];
-                                  setUploadFiles(newFiles.filter((f, i) => i < 3));
-                                }
-                              }} 
-                              className="hidden" 
-                            />
-                            <div className="px-4 py-2 rounded-lg border border-stone-300 bg-stone-50 text-sm text-brand-maroon font-bold hover:bg-stone-100 transition-colors">
-                              Choose Image {index + 1}
-                            </div>
-                          </label>
-                          {uploadFiles[index] && (
-                            <>
-                              <img src={URL.createObjectURL(uploadFiles[index])} alt={`preview ${index}`} className="h-12 w-12 rounded-md object-cover" />
-                              <input
-                                type="text"
-                                placeholder="Caption (optional)"
-                                value={uploadCaptions[index] || ""}
-                                onChange={(e) => {
-                                  const newCaptions = [...uploadCaptions];
-                                  newCaptions[index] = e.target.value;
-                                  setUploadCaptions(newCaptions);
-                                }}
-                                className="flex-1 rounded-lg border border-stone-200 px-3 py-2 text-sm"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const newFiles = uploadFiles.filter((_, i) => i !== index);
-                                  const newCaptions = uploadCaptions.filter((_, i) => i !== index);
-                                  setUploadFiles(newFiles);
-                                  setUploadCaptions([...newCaptions, ""]);
-                                }}
-                                className="text-red-600 hover:text-red-700 font-bold text-sm"
+                    {event.description && (
+                      <p className="relative mt-5 max-w-3xl text-[0.98rem] font-normal leading-7 text-stone-600 sm:mt-6 sm:text-[1.02rem] sm:leading-7">
+                        {event.description}
+                      </p>
+                    )}
+
+                    {event.activities.length > 0 && (
+                      <div className="relative mt-6 border-t border-brand-maroon/[0.08] pt-5 sm:mt-7 sm:pt-6">
+                        <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.24em] text-brand-maroon/70">Impact &amp; Activities</p>
+                        <div className="grid grid-cols-1 divide-y divide-brand-maroon/[0.08] border-y border-brand-maroon/[0.08] sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-3">
+                          {event.activities.slice(0, 4).map((activity, i) => {
+                            const Icon = getDisplayActivityIcon(event.title, activity.name);
+                            return (
+                              <div
+                                key={i}
+                                className="group/activity flex min-w-0 items-center gap-3 px-1 py-3.5 sm:px-4 sm:first:pl-1 lg:px-5 lg:first:pl-1"
                               >
-                                Remove
-                              </button>
-                            </>
-                          )}
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-brand-maroon/10 bg-brand-cream/40 text-brand-maroon transition-transform duration-200 group-hover/activity:scale-105">
+                                  <Icon size={15} strokeWidth={1.8} />
+                                </span>
+                                <span className="min-w-0 text-[0.82rem] font-medium leading-5 text-stone-700 sm:text-sm">
+                                  {activity.name}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
 
-                    <div className="mt-6 flex items-center gap-3">
-                      <button 
-                        type="submit" 
-                        disabled={uploadFiles.length === 0 || uploadingMultiple} 
-                        className="rounded-full bg-brand-maroon px-6 py-3 text-[10px] font-bold uppercase tracking-[0.3em] text-white disabled:opacity-60 hover:bg-stone-900 transition-colors"
-                      >
-                        {uploadingMultiple ? `Uploading ${uploadFiles.length} image${uploadFiles.length !== 1 ? 's' : ''}...` : `Upload ${uploadFiles.length} Image${uploadFiles.length !== 1 ? 's' : ''}`}
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={() => { setShowUploadOnOpen(false); setUploadFiles([]); setUploadCaptions(["", "", ""]); }} 
-                        className="rounded-full border border-stone-300 px-6 py-3 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-maroon hover:bg-stone-50 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+                    {event.acknowledgments && (
+                      <div className="relative mt-6 flex gap-3 rounded-2xl border border-brand-maroon/[0.08] bg-brand-cream/45 px-4 py-3.5 sm:mt-7 sm:px-5 sm:py-4">
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-maroon text-white">
+                          <Heart size={13} fill="currentColor" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/60">With gratitude</p>
+                          <p className="mt-1.5 text-sm font-normal leading-6 text-stone-700 sm:text-[0.95rem]">{event.acknowledgments}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {isAdmin && (
+                      <div className="relative mt-5 flex flex-wrap gap-2 border-t border-brand-maroon/[0.08] pt-4 sm:mt-5 sm:pt-4">
+                        <button
+                          type="button"
+                          onClick={() => openEditEvent(event)}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.22em] text-brand-maroon transition-all hover:border-brand-maroon hover:bg-brand-maroon hover:text-white"
+                        >
+                          <Pencil size={12} />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteEvent(event)}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.22em] text-stone-600 transition-all hover:border-red-400 hover:bg-red-50 hover:text-red-600"
+                        >
+                          <Trash2 size={12} />
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+        </div>
+      </motion.div>
     </section>
   );
 }

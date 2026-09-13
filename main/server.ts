@@ -54,6 +54,114 @@ const upload = multer({
 
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret_for_dev";
 
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+  throw new Error(
+    "JWT_SECRET must be set in production. Refusing to start with the built-in development secret, " +
+      "which would let anyone mint a valid admin session."
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * Who counts as an admin.
+ *
+ * One definition, used by every protected route. It deliberately has NO
+ * NODE_ENV escape hatch: six route handlers previously ended their check with
+ * `|| process.env.NODE_ENV !== "production"`, so a deploy that simply forgot
+ * to set that variable authorised every upload, edit, reorder and delete on
+ * the site for anyone at all — silently, with no error to notice.
+ *
+ * The email allowlist exists so an account whose DB role hasn't been promoted
+ * yet still works. Override it with ADMIN_EMAILS (comma separated) instead of
+ * editing code.
+ * ---------------------------------------------------------------------- */
+const ADMIN_EMAIL_ALLOWLIST = new Set(
+  String(
+    process.env.ADMIN_EMAILS ||
+      "24r01a66v9@cmrithyderabad.edu.in,admin@ikshana.local"
+  )
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+const isAdminUser = (req: any): boolean => {
+  if (String(req?.user?.role || "").toLowerCase() === "admin") return true;
+  const email = String(req?.user?.email || "").trim().toLowerCase();
+  return email !== "" && ADMIN_EMAIL_ALLOWLIST.has(email);
+};
+
+/**
+ * True when Supabase/PostgREST is telling us a table simply isn't there yet.
+ *
+ * Several features depend on tables created by
+ * db/pending/2026-09-06_site_features.sql. Until that runs, their routes
+ * report "unavailable" instead of 500ing, so the site works in both states.
+ *
+ * Note that PGRST205 ("could not find the table in the schema cache") is
+ * ambiguous — it also fires when PostgREST's cache is merely stale — so this
+ * is only ever used to degrade a feature gracefully, never to conclude that
+ * data has been lost.
+ */
+const isMissingTableError = (error: any): boolean => {
+  const text = `${error?.message || ""} ${error?.code || ""} ${error?.details || ""}`.toLowerCase();
+  return (
+    text.includes("does not exist") ||
+    text.includes("schema cache") ||
+    text.includes("relation") ||
+    error?.code === "42p01" ||
+    error?.code === "pgrst205"
+  );
+};
+
+const MISSING_TABLE_HINT =
+  "highlight_prefs table not found — run db/pending/2026-09-06_site_features.sql in Supabase to enable pinning.";
+
+/* -------------------------------------------------------------------------
+ * Minimal in-memory rate limiter for the three endpoints the public can write
+ * to. Dependency-free and per-process, which is enough to stop review spam and
+ * to stop the help-request status lookup being walked phone number by phone
+ * number. If this ever runs on more than one instance it needs a shared store.
+ * ---------------------------------------------------------------------- */
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+const rateLimit = (opts: { windowMs: number; max: number; key: string }) => {
+  return (req: any, res: any, next: any) => {
+    const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const ip = forwarded || req.ip || req.socket?.remoteAddress || "unknown";
+    const id = `${opts.key}:${ip}`;
+    const now = Date.now();
+    const bucket = rateBuckets.get(id);
+
+    if (!bucket || now > bucket.resetAt) {
+      rateBuckets.set(id, { count: 1, resetAt: now + opts.windowMs });
+      return next();
+    }
+
+    if (bucket.count >= opts.max) {
+      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfter));
+      const minutes = Math.ceil(retryAfter / 60);
+      return res.status(429).json({
+        error:
+          retryAfter < 90
+            ? `Too many attempts. Please try again in ${retryAfter} seconds.`
+            : `Too many attempts. Please try again in about ${minutes} minutes.`,
+      });
+    }
+
+    bucket.count += 1;
+    return next();
+  };
+};
+
+const rateBucketSweep = setInterval(() => {
+  const now = Date.now();
+  rateBuckets.forEach((bucket, key) => {
+    if (now > bucket.resetAt) rateBuckets.delete(key);
+  });
+}, 10 * 60 * 1000);
+if (typeof rateBucketSweep.unref === "function") rateBucketSweep.unref();
+
 const createMailTransporter = () => {
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
@@ -129,6 +237,48 @@ function normalizeEventRecord(event: any) {
         ? JSON.parse(event.activities)
         : event.activities || [],
   };
+}
+
+function parseEventDate(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  const match = text.match(
+    /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})$/i,
+  );
+  if (!match) return null;
+
+  const months: Record<string, number> = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12,
+  };
+
+  const month = months[match[1].toLowerCase()];
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+
+  if (!month || !Number.isInteger(day) || !Number.isInteger(year)) return null;
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 // Supabase Setup (Mandatory)
@@ -329,33 +479,21 @@ async function startServer() {
       : "";
     const token = cookieToken || headerToken || fallbackHeaderToken;
 
+    // No implicit-admin fallback. This used to fall through to a synthetic
+    // development admin both when no token was presented at all and when JWT
+    // verification failed outright, whenever NODE_ENV !== "production". That
+    // made every admin route an open endpoint the moment the variable was
+    // missing on a deploy. The development admin still exists — but it is only
+    // reachable by actually signing in through /api/auth/login with its password.
     if (!token) {
-      const developmentAdmin = developmentAdminAccount;
-      if (developmentAdmin) {
-        req.user = {
-          id: 0,
-          name: developmentAdmin.name,
-          email: developmentAdmin.emails[0],
-          role: developmentAdmin.role,
-        };
-        return next();
-      }
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: "Please sign in to continue." });
     }
 
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
       if (err) {
-        const developmentAdmin = developmentAdminAccount;
-        if (developmentAdmin) {
-          req.user = {
-            id: 0,
-            name: developmentAdmin.name,
-            email: developmentAdmin.emails[0],
-            role: developmentAdmin.role,
-          };
-          return next();
-        }
-        return res.status(403).json({ error: "Forbidden" });
+        return res
+          .status(401)
+          .json({ error: "Your session has expired. Please sign in again." });
       }
       req.user = user;
       next();
@@ -836,6 +974,7 @@ async function startServer() {
       const { data, error } = await supabase
         .from("events")
         .select("*")
+        .order("event_date", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json((data || []).map(normalizeEventRecord));
@@ -858,7 +997,7 @@ async function startServer() {
   });
 
   app.post("/api/events", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -869,7 +1008,8 @@ async function startServer() {
       description,
       acknowledgments,
       activities,
-      image,
+      originalTitle,
+      originalDate,
     } = req.body;
     if (!title || !date || !description) {
       return res
@@ -881,6 +1021,7 @@ async function startServer() {
       const insertPayload: Record<string, any> = {
         title,
         date,
+        event_date: parseEventDate(date),
         occasion: occasion || "Additional Event",
         description,
       };
@@ -889,7 +1030,6 @@ async function startServer() {
         insertPayload.acknowledgments = acknowledgments || null;
       if (activities !== undefined)
         insertPayload.activities = Array.isArray(activities) ? activities : [];
-      if (image !== undefined) insertPayload.image = image || null;
 
       const { data, error } = await supabase
         .from("events")
@@ -920,7 +1060,7 @@ async function startServer() {
   });
 
   app.patch("/api/events/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -932,54 +1072,69 @@ async function startServer() {
       description,
       acknowledgments,
       activities,
-      image,
     } = req.body;
 
     try {
-      const { data, error } = await supabase
-        .from("events")
-        .update({
-          title,
-          date,
-          occasion,
-          description,
-          acknowledgments,
-          activities: Array.isArray(activities) ? activities : [],
-          image,
-        })
-        .eq("id", id)
-        .select();
+      const updatePayload = {
+        title,
+        date,
+        event_date: parseEventDate(date),
+        occasion,
+        description,
+        acknowledgments,
+        activities: Array.isArray(activities) ? activities : [],
+      };
+
+      let data: any[] | null = null;
+      let error: any = null;
+
+      if (/^\d+$/.test(String(id))) {
+        const result = await supabase
+          .from("events")
+          .update(updatePayload)
+          .eq("id", Number(id))
+          .select();
+        data = result.data;
+        error = result.error;
+      } else {
+        // Legacy seed events use string ids in the frontend, while the
+        // Supabase events table uses integer ids. Resolve a legacy request
+        // using its title/date instead of ever comparing a string to id.
+        const lookup = await supabase
+          .from("events")
+          .select("id")
+          .eq("title", originalTitle || title)
+          .eq("date", originalDate || date)
+          .limit(1);
+
+        if (lookup.error) throw lookup.error;
+        const matchedId = lookup.data?.[0]?.id;
+
+        if (matchedId === undefined || matchedId === null) {
+          return res.status(404).json({ error: "Event not found in Supabase" });
+        }
+
+        const result = await supabase
+          .from("events")
+          .update(updatePayload)
+          .eq("id", matchedId)
+          .select();
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) throw error;
+
+      if (!data?.[0]) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+
       return res.json({
         success: true,
-        event: normalizeEventRecord(data?.[0]),
+        event: normalizeEventRecord(data[0]),
       });
     } catch (error: any) {
       console.error("Supabase update event error:", error);
-      // If Supabase is unreachable in development, return success so client can continue with optimistic update
-      const errText = JSON.stringify(error || {}) || String(error || "");
-      if (
-        errText.toLowerCase().includes("getaddrinfo") ||
-        errText.toLowerCase().includes("enotfound") ||
-        errText.toLowerCase().includes("fetch failed")
-      ) {
-        console.warn(
-          "Supabase unreachable — returning optimistic success for PATCH /api/events/:id"
-        );
-        return res.json({
-          success: true,
-          event: {
-            id,
-            title,
-            date,
-            occasion,
-            description,
-            acknowledgments,
-            activities,
-          },
-        });
-      }
       res
         .status(500)
         .json({ error: error.message || "Failed to update event" });
@@ -987,29 +1142,26 @@ async function startServer() {
   });
 
   app.delete("/api/events/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
     const { id } = req.params;
     try {
-      const { error } = await supabase.from("events").delete().eq("id", id);
+      const { data, error } = await supabase
+        .from("events")
+        .delete()
+        .eq("id", id)
+        .select("id");
       if (error) throw error;
+
+      if (!data?.length) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+
       return res.json({ success: true });
     } catch (error: any) {
       console.error("Supabase delete event error:", error);
-      // If Supabase is unreachable in development, return success so client can proceed with optimistic delete
-      const errText = JSON.stringify(error || {}) || String(error || "");
-      if (
-        errText.toLowerCase().includes("getaddrinfo") ||
-        errText.toLowerCase().includes("enotfound") ||
-        errText.toLowerCase().includes("fetch failed")
-      ) {
-        console.warn(
-          "Supabase unreachable — returning optimistic success for DELETE /api/events/:id"
-        );
-        return res.json({ success: true });
-      }
       res
         .status(500)
         .json({ error: error.message || "Failed to delete event" });
@@ -1088,7 +1240,10 @@ async function startServer() {
   });
 
   // Debug endpoint: check photos table accessibility and surface Supabase errors
-  app.get("/api/debug/photos-check", async (req, res) => {
+  app.get("/api/debug/photos-check", authenticateToken, async (req: any, res) => {
+    if (!isAdminUser(req)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
     try {
       const { data, error } = await supabase
         .from("photos")
@@ -1147,14 +1302,7 @@ async function startServer() {
             : null
         );
 
-        const email = String(req.user?.email || "")
-          .trim()
-          .toLowerCase();
-        const isAuthorized =
-          req.user?.role === "admin" ||
-          email === "24r01a66v9@cmrithyderabad.edu.in" ||
-          email === "admin@ikshana.local" ||
-          process.env.NODE_ENV !== "production";
+        const isAuthorized = isAdminUser(req);
 
         if (!isAuthorized) {
           return res.status(403).json({ error: "Admin access required" });
@@ -1291,7 +1439,7 @@ async function startServer() {
   );
 
   app.delete("/api/photos/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -1335,14 +1483,7 @@ async function startServer() {
     authenticateOptionalToken,
     upload.single("file"),
     async (req: any, res) => {
-      const email = String(req.user?.email || "")
-        .trim()
-        .toLowerCase();
-      const isAuthorized =
-        req.user?.role === "admin" ||
-        email === "24r01a66v9@cmrithyderabad.edu.in" ||
-        email === "admin@ikshana.local" ||
-        process.env.NODE_ENV !== "production";
+      const isAuthorized = isAdminUser(req);
 
       if (!isAuthorized) {
         return res.status(403).json({ error: "Admin access required" });
@@ -1479,7 +1620,7 @@ async function startServer() {
     "/api/photos/:id/feature",
     authenticateToken,
     async (req: any, res) => {
-      if (req.user.role !== "admin") {
+      if (!isAdminUser(req)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
@@ -1514,7 +1655,7 @@ async function startServer() {
 
   // Reorder photos in gallery
   app.post("/api/photos/reorder", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -1642,7 +1783,7 @@ async function startServer() {
   });
 
   app.post("/api/milestones", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -1677,7 +1818,7 @@ async function startServer() {
   });
 
   app.patch("/api/milestones/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -1713,7 +1854,7 @@ async function startServer() {
     "/api/milestones/:id",
     authenticateToken,
     async (req: any, res) => {
-      if (req.user.role !== "admin") {
+      if (!isAdminUser(req)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
@@ -1758,14 +1899,7 @@ async function startServer() {
     authenticateOptionalToken,
     upload.single("file"),
     async (req: any, res) => {
-      const email = String(req.user?.email || "")
-        .trim()
-        .toLowerCase();
-      const isAuthorized =
-        req.user?.role === "admin" ||
-        email === "24r01a66v9@cmrithyderabad.edu.in" ||
-        email === "admin@ikshana.local" ||
-        process.env.NODE_ENV !== "production";
+      const isAuthorized = isAdminUser(req);
 
       if (!isAuthorized) {
         return res.status(403).json({ error: "Admin access required" });
@@ -1826,14 +1960,7 @@ async function startServer() {
     authenticateOptionalToken,
     upload.single("file"),
     async (req: any, res) => {
-      const email = String(req.user?.email || "")
-        .trim()
-        .toLowerCase();
-      const isAuthorized =
-        req.user?.role === "admin" ||
-        email === "24r01a66v9@cmrithyderabad.edu.in" ||
-        email === "admin@ikshana.local" ||
-        process.env.NODE_ENV !== "production";
+      const isAuthorized = isAdminUser(req);
 
       if (!isAuthorized) {
         return res.status(403).json({ error: "Admin access required" });
@@ -1909,14 +2036,7 @@ async function startServer() {
     "/api/leadership-members/:id",
     authenticateOptionalToken,
     async (req: any, res) => {
-      const email = String(req.user?.email || "")
-        .trim()
-        .toLowerCase();
-      const isAuthorized =
-        req.user?.role === "admin" ||
-        email === "24r01a66v9@cmrithyderabad.edu.in" ||
-        email === "admin@ikshana.local" ||
-        process.env.NODE_ENV !== "production";
+      const isAuthorized = isAdminUser(req);
 
       if (!isAuthorized) {
         return res.status(403).json({ error: "Admin access required" });
@@ -1961,6 +2081,8 @@ async function startServer() {
   );
 
   // Videos API
+  // Returns an empty list rather than 500 when the `videos` table hasn't
+  // been created yet — see db/pending/2026-09-06_site_features.sql.
   app.get("/api/videos", async (req, res) => {
     try {
       const { data, error } = await supabase
@@ -1969,14 +2091,15 @@ async function startServer() {
         .order("created_at", { ascending: false });
       if (error) throw error;
       return res.json(data);
-    } catch (error) {
+    } catch (error: any) {
+      if (isMissingTableError(error)) return res.json([]);
       console.error("Supabase fetch videos error:", error);
       res.status(500).json({ error: "Failed to fetch videos" });
     }
   });
 
   app.post("/api/videos", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { title, description, url, thumbnail, category, date } = req.body;
@@ -2007,7 +2130,7 @@ async function startServer() {
   });
 
   app.delete("/api/videos/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { id } = req.params;
@@ -2037,7 +2160,7 @@ async function startServer() {
   });
 
   app.post("/api/sponsors", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const {
@@ -2076,7 +2199,7 @@ async function startServer() {
   });
 
   app.delete("/api/sponsors/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { id } = req.params;
@@ -2107,7 +2230,7 @@ async function startServer() {
   });
 
   app.post("/api/jobs", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const {
@@ -2150,7 +2273,7 @@ async function startServer() {
   });
 
   app.delete("/api/jobs/:id", authenticateToken, async (req: any, res) => {
-    if (req.user.role !== "admin") {
+    if (!isAdminUser(req)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const { id } = req.params;
@@ -2182,10 +2305,29 @@ async function startServer() {
     }
   });
 
-  app.post("/api/reviews", async (req, res) => {
-    const { user_name, rating, comment } = req.body;
-    if (!user_name || !rating || !comment) {
-      return res.status(400).json({ error: "Missing required fields" });
+  // Public by design — visitors leave reviews without an account. That makes
+  // it the one endpoint anyone on the internet can write rows through, so it
+  // needs a rate limit and hard length caps. Previously it had neither, and
+  // would accept unlimited reviews under any name, including a founder's.
+  app.post(
+    "/api/reviews",
+    rateLimit({ windowMs: 60 * 60 * 1000, max: 3, key: "review" }),
+    async (req, res) => {
+    const user_name = String(req.body?.user_name || "").trim();
+    const comment = String(req.body?.comment || "").trim();
+    const rating = Number(req.body?.rating);
+
+    if (!user_name || !comment) {
+      return res.status(400).json({ error: "Please add your name and a comment." });
+    }
+    if (user_name.length > 60) {
+      return res.status(400).json({ error: "Please keep your name under 60 characters." });
+    }
+    if (comment.length > 1200) {
+      return res.status(400).json({ error: "Please keep your review under 1200 characters." });
+    }
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: "Choose a rating from 1 to 5." });
     }
 
     try {
@@ -2206,17 +2348,11 @@ async function startServer() {
       console.error("Supabase add review error:", error);
       res.status(500).json({ error: "Failed to submit review" });
     }
-  });
+    }
+  );
 
   app.delete("/api/reviews/:id", authenticateToken, async (req: any, res) => {
-    const email = String(req.user?.email || "")
-      .trim()
-      .toLowerCase();
-    const isAuthorized =
-      req.user?.role === "admin" ||
-      email === "24r01a66v9@cmrithyderabad.edu.in" ||
-      email === "admin@ikshana.local" ||
-      process.env.NODE_ENV !== "production";
+    const isAuthorized = isAdminUser(req);
 
     if (!isAuthorized) {
       return res.status(403).json({ error: "Admin access required" });
@@ -2234,70 +2370,309 @@ async function startServer() {
     }
   });
 
-  // Medical Requests API
-  app.post("/api/medical-request", async (req, res) => {
-    const {
-      patient_name,
-      contact_number,
-      emergency_details,
-      hospital_name,
-      required_amount,
-      documents,
-    } = req.body;
-    if (!patient_name || !contact_number || !emergency_details) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
+  /* ---------------------------------------------------------------------
+   * Highlights scroller (home page)
+   *
+   * The feed itself is derived on the client from photos + events, so this
+   * endpoint only carries the ADMIN EXCEPTIONS: what's pinned to the front and
+   * what's hidden. That keeps the scroller working with zero curation.
+   *
+   * If sql/003_highlight_prefs.sql hasn't been run yet the table won't exist.
+   * Rather than 500, we return an empty set so the scroller degrades to a pure
+   * auto feed and the site keeps working.
+   * ------------------------------------------------------------------- */
+  app.get("/api/highlights/prefs", async (req, res) => {
     try {
       const { data, error } = await supabase
-        .from("medical_requests")
-        .insert([
-          {
-            patient_name,
-            contact_number,
-            emergency_details,
-            hospital_name,
-            required_amount,
-            documents,
-            status: "pending",
-          },
-        ])
-        .select();
-
+        .from("highlight_prefs")
+        .select("item_key, pinned, hidden, sort_order");
       if (error) throw error;
-      return res.json({ success: true, id: data[0].id });
-    } catch (error) {
-      console.error("Supabase add medical request error:", error);
-      res.status(500).json({ error: "Failed to submit request" });
+      return res.json({ available: true, prefs: data || [] });
+    } catch (error: any) {
+      if (isMissingTableError(error)) {
+        return res.json({ available: false, prefs: [], hint: MISSING_TABLE_HINT });
+      }
+      console.error("Supabase fetch highlight prefs error:", error);
+      return res.status(500).json({ error: "Failed to load highlight settings" });
     }
   });
 
-  app.get("/api/medical-request/:contact", async (req, res) => {
-    const { contact } = req.params;
+  app.put("/api/highlights/prefs", authenticateToken, async (req: any, res) => {
+    if (!isAdminUser(req)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const itemKey = String(req.body?.item_key || "").trim();
+    if (!/^(photo|event):[A-Za-z0-9_-]{1,120}$/.test(itemKey)) {
+      return res.status(400).json({ error: "Invalid item reference." });
+    }
+
+    const pinned = Boolean(req.body?.pinned);
+    const hidden = Boolean(req.body?.hidden);
+    const sortOrder = Number.isFinite(Number(req.body?.sort_order))
+      ? Number(req.body.sort_order)
+      : 0;
 
     try {
-      const { data, error } = await supabase
-        .from("medical_requests")
-        .select("*")
-        .eq("contact_number", contact)
-        .order("created_at", { ascending: false })
-        .limit(1);
+      // Nothing to remember once an item is neither pinned nor hidden — drop
+      // the row rather than accumulating no-op records forever.
+      if (!pinned && !hidden) {
+        const { error } = await supabase
+          .from("highlight_prefs")
+          .delete()
+          .eq("item_key", itemKey);
+        if (error) throw error;
+        return res.json({ success: true, cleared: true });
+      }
 
+      const { data, error } = await supabase
+        .from("highlight_prefs")
+        .upsert(
+          { item_key: itemKey, pinned, hidden, sort_order: sortOrder, updated_at: new Date().toISOString() },
+          { onConflict: "item_key" },
+        )
+        .select();
       if (error) throw error;
-      if (data && data.length > 0) {
-        return res.json(data[0]);
-      } else {
+      return res.json({ success: true, pref: data?.[0] ?? null });
+    } catch (error: any) {
+      if (isMissingTableError(error)) {
+        return res.status(503).json({ error: MISSING_TABLE_HINT });
+      }
+      console.error("Supabase save highlight pref error:", error);
+      return res.status(500).json({ error: "Failed to save highlight setting" });
+    }
+  });
+
+  /* ---------------------------------------------------------------------
+   * Site settings — the small key/value store behind the Donate panel, the
+   * journey video, and the contact details.
+   *
+   * None of this existed anywhere before: there was no field for a UPI ID, a
+   * QR image, or bank details, which is why the Donate button had nowhere to
+   * point. See db/pending/2026-09-06_site_features.sql.
+   *
+   * If that migration hasn't been run the table is absent, and every route
+   * here reports `available: false` rather than 500ing, so the Donate panel
+   * simply stays hidden and the rest of the site is unaffected.
+   * ------------------------------------------------------------------- */
+
+  // Whitelisted so a compromised admin session can't write arbitrary keys, and
+  // so a typo in the client can't silently create a setting nothing reads.
+  const SETTING_KEYS = new Set([
+    "donate_upi_id",
+    "donate_upi_payee_name",
+    "donate_qr_url",
+    "donate_bank_name",
+    "donate_bank_account_name",
+    "donate_bank_account_no",
+    "donate_bank_ifsc",
+    "donate_bank_branch",
+    "donate_note",
+    "journey_video_url",
+    "journey_video_title",
+    "contact_email",
+    "contact_location",
+  ]);
+
+  const SETTINGS_HINT =
+    "site_settings table not found — run db/pending/2026-09-06_site_features.sql in Supabase.";
+
+  app.get("/api/settings", async (req, res) => {
+    try {
+      const { data, error } = await supabase.from("site_settings").select("key, value");
+      if (error) throw error;
+      const settings: Record<string, string> = {};
+      (data || []).forEach((row: any) => {
+        if (SETTING_KEYS.has(row.key)) settings[row.key] = row.value ?? "";
+      });
+      return res.json({ available: true, settings });
+    } catch (error: any) {
+      if (isMissingTableError(error)) {
+        return res.json({ available: false, settings: {}, hint: SETTINGS_HINT });
+      }
+      console.error("Supabase fetch settings error:", error);
+      return res.status(500).json({ error: "Failed to load site settings" });
+    }
+  });
+
+  app.put("/api/settings", authenticateToken, async (req: any, res) => {
+    if (!isAdminUser(req)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const incoming = req.body?.settings;
+    if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+      return res.status(400).json({ error: "Expected a { settings: { key: value } } object." });
+    }
+
+    const rows: { key: string; value: string; updated_at: string; updated_by: string }[] = [];
+    const rejected: string[] = [];
+    for (const [key, raw] of Object.entries(incoming)) {
+      if (!SETTING_KEYS.has(key)) { rejected.push(key); continue; }
+      const value = raw === null || raw === undefined ? "" : String(raw).trim();
+      if (value.length > 2000) {
+        return res.status(400).json({ error: `"${key}" is too long.` });
+      }
+      rows.push({
+        key,
+        value,
+        updated_at: new Date().toISOString(),
+        updated_by: String(req.user?.email || "admin"),
+      });
+    }
+
+    if (rejected.length) {
+      return res.status(400).json({ error: `Unknown setting(s): ${rejected.join(", ")}` });
+    }
+    if (!rows.length) {
+      return res.status(400).json({ error: "Nothing to save." });
+    }
+
+    try {
+      const { error } = await supabase.from("site_settings").upsert(rows, { onConflict: "key" });
+      if (error) throw error;
+      return res.json({ success: true, saved: rows.length });
+    } catch (error: any) {
+      if (isMissingTableError(error)) {
+        return res.status(503).json({ error: SETTINGS_HINT });
+      }
+      console.error("Supabase save settings error:", error);
+      return res.status(500).json({ error: "Failed to save site settings" });
+    }
+  });
+
+  // Medical Requests API
+  const MAX_HELP_DOCUMENTS = 5;
+  const MAX_HELP_DOCUMENT_CHARS = 4 * 1024 * 1024; // ~3 MB of file, base64 encoded
+
+  app.post(
+    "/api/medical-request",
+    rateLimit({ windowMs: 60 * 60 * 1000, max: 5, key: "help-submit" }),
+    async (req, res) => {
+      const patient_name = String(req.body?.patient_name || "").trim();
+      const contact_number = String(req.body?.contact_number || "").trim();
+      const emergency_details = String(req.body?.emergency_details || "").trim();
+      const hospital_name = String(req.body?.hospital_name || "").trim();
+      const required_amount = req.body?.required_amount ?? null;
+
+      if (!patient_name || !contact_number || !emergency_details) {
+        return res.status(400).json({
+          error: "Patient name, contact number and details of the emergency are all required.",
+        });
+      }
+      if (patient_name.length > 120) {
+        return res.status(400).json({ error: "Please keep the patient name under 120 characters." });
+      }
+      if (hospital_name.length > 160) {
+        return res.status(400).json({ error: "Please keep the hospital name under 160 characters." });
+      }
+      if (emergency_details.length > 4000) {
+        return res.status(400).json({ error: "Please keep the details under 4000 characters." });
+      }
+      if (!/^[0-9+\-()\s]{6,20}$/.test(contact_number)) {
+        return res.status(400).json({ error: "Enter a valid contact number." });
+      }
+
+      // Files arrive as base64 data URLs in the JSON body. Cap both the count
+      // and the size — the body parser allows 50mb, which is enough for a
+      // single request to stall the process and bloat the database row.
+      let documents: string | null = null;
+      try {
+        const raw = req.body?.documents;
+        const list = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (Array.isArray(list) && list.length > 0) {
+          if (list.length > MAX_HELP_DOCUMENTS) {
+            return res
+              .status(400)
+              .json({ error: `Please attach at most ${MAX_HELP_DOCUMENTS} files.` });
+          }
+          const oversized = list.some(
+            (entry: unknown) =>
+              typeof entry === "string" && entry.length > MAX_HELP_DOCUMENT_CHARS
+          );
+          if (oversized) {
+            return res
+              .status(413)
+              .json({ error: "One of those files is too large. Please keep each under 3 MB." });
+          }
+          documents = JSON.stringify(list);
+        }
+      } catch {
+        return res
+          .status(400)
+          .json({ error: "Those attachments could not be read. Please try adding them again." });
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("medical_requests")
+          .insert([
+            {
+              patient_name,
+              contact_number,
+              emergency_details,
+              hospital_name: hospital_name || null,
+              required_amount,
+              documents,
+              status: "pending",
+            },
+          ])
+          .select();
+
+        if (error) throw error;
+        return res.json({ success: true, id: data[0].id });
+      } catch (error) {
+        console.error("Supabase add medical request error:", error);
+        res.status(500).json({ error: "Failed to submit request" });
+      }
+    }
+  );
+
+  // Public, so a family can check on their own request — which is why it must
+  // hand back as little as possible. A phone number is guessable, so this
+  // deliberately does NOT select("*"): no patient name, no emergency details,
+  // no hospital, no documents. Just enough to answer "where is my request?".
+  app.get(
+    "/api/medical-request/:contact",
+    rateLimit({ windowMs: 10 * 60 * 1000, max: 12, key: "help-status" }),
+    async (req, res) => {
+      const contact = String(req.params.contact || "").trim();
+      if (contact.length < 6) {
+        return res
+          .status(400)
+          .json({ error: "Enter the full contact number used on the request." });
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("medical_requests")
+          .select("id, status, created_at, expiry_date")
+          .eq("contact_number", contact)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (error) throw error;
+        if (data && data.length > 0) {
+          return res.json(data[0]);
+        }
         return res
           .status(404)
           .json({ error: "No request found for this number" });
+      } catch (error) {
+        console.error("Supabase fetch medical request error:", error);
+        res.status(500).json({ error: "Failed to fetch request status" });
       }
-    } catch (error) {
-      console.error("Supabase fetch medical request error:", error);
-      res.status(500).json({ error: "Failed to fetch request status" });
     }
-  });
+  );
 
-  app.get("/api/medical-requests", async (req, res) => {
+  // Admin only. This returns patient names, contact numbers, the emergency
+  // description and the uploaded documents for every request ever submitted;
+  // it previously had no authentication at all, so anyone who knew the URL
+  // could download the lot.
+  app.get("/api/medical-requests", authenticateToken, async (req: any, res) => {
+    if (!isAdminUser(req)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
     try {
       const { data, error } = await supabase
         .from("medical_requests")
@@ -2316,7 +2691,7 @@ async function startServer() {
     "/api/medical-request/:id",
     authenticateToken,
     async (req: any, res) => {
-      if (req.user.role !== "admin") {
+      if (!isAdminUser(req)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       const { id } = req.params;
@@ -2339,7 +2714,7 @@ async function startServer() {
     "/api/medical-request/:id",
     authenticateToken,
     async (req: any, res) => {
-      if (req.user.role !== "admin") {
+      if (!isAdminUser(req)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       const { id } = req.params;

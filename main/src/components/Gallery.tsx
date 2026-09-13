@@ -6,13 +6,16 @@ import React, {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
   BookOpen,
   CalendarDays,
   Camera,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   GripVertical,
   HeartHandshake,
   ImageIcon,
@@ -121,13 +124,6 @@ const groupRowsIntoMemories = (rows: PhotoRow[]): Memory[] => {
 // Ikshana actually does, and each category gets its own color identity (a
 // top accent stripe, badge, and hover glow) so the three read as distinct at
 // a glance rather than just differently-labeled versions of the same card.
-//
-// NOTE: `shortLabel` used to be swapped in on mobile in place of the full
-// `label`/`plural` text. That was the cause of the truncated mobile text
-// ("Fundraising" instead of "Fundraising Event(s)") — the full label is now
-// always rendered everywhere, just at a smaller font size on narrow
-// screens, so `shortLabel` is unused. Left in place in case something else
-// still references it.
 const ARCHIVE_TYPES: {
   key: ArchiveType;
   label: string;
@@ -711,6 +707,111 @@ function CropModal({ image, initialRatioKey = "portrait", onCancel, onConfirm }:
 }
 
 /* ------------------------------------------------------------------ */
+/*  Memory cover collage                                               */
+/* ------------------------------------------------------------------ */
+/*
+ * Renders the cover of a memory card. A single photo fills the whole box.
+ * Two or more photos render as a real collage instead of hiding everyone
+ * but the first photo — the exact layout (split halves / one big + two
+ * small / 2x2 grid with a "+N" tile) depends on how many photos are in the
+ * memory, mirroring the classic Facebook/Google-Photos album-cover pattern.
+ * The tile order always follows the admin's own ordering from the edit
+ * form (drag/move-left/move-right, with the first photo marked "Cover"),
+ * so whatever they picked as the lead photo is always the largest/first
+ * tile here too.
+ */
+// A tiny wrapper that fades an image in once it's actually loaded instead
+// of letting it pop in abruptly, with a soft pulsing placeholder underneath
+// so the tile never reads as a flat empty gray box while waiting.
+function FadeImage({
+  src,
+  alt,
+  className = "",
+  eager = false,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  eager?: boolean;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-stone-100">
+      {!loaded && <div className="absolute inset-0 animate-pulse bg-stone-200/70" aria-hidden="true" />}
+      <img
+        src={src}
+        alt={alt}
+        loading={eager ? "eager" : "lazy"}
+        onLoad={() => setLoaded(true)}
+        className={`h-full w-full object-cover transition-opacity duration-300 ${
+          loaded ? "opacity-100" : "opacity-0"
+        } ${className}`}
+      />
+    </div>
+  );
+}
+
+function MemoryCoverCollage({ photos, title }: { photos: MemoryPhoto[]; title: string }) {
+  const count = photos.length;
+  const cover = photos[0];
+
+  if (count <= 1) {
+    return (
+      <FadeImage
+        src={cover.url}
+        alt={title}
+        eager
+        className="transition-transform duration-700 group-hover:scale-105"
+      />
+    );
+  }
+
+  // A stack of photos instead of a tiled collage: only the single cover
+  // photo (whatever the admin ordered first) is ever shown at full size —
+  // the exact same well-behaved crop as a single-photo memory — with the
+  // next one or two photos peeking out from behind it, offset and tilted
+  // like a stack of physical prints. Because those peeking photos are
+  // mostly hidden, their own crop quality never matters, which sidesteps
+  // the whole "we can't know if a photo is portrait or landscape" problem
+  // a tiled grid kept running into. It also echoes the slight tilt these
+  // cards already have (see CARD_TILTS) instead of fighting it.
+  const behind = photos.slice(1, 3);
+
+  return (
+    <div className="relative h-full w-full">
+      {behind[1] && (
+        <div className="absolute inset-0 origin-bottom-right rotate-[7deg] scale-[0.93] overflow-hidden rounded-[10px] border-[3px] border-white bg-stone-100 shadow-sm">
+          <img src={behind[1].url} alt="" aria-hidden="true" loading="lazy" className="h-full w-full object-cover" />
+        </div>
+      )}
+      {behind[0] && (
+        <div className="absolute inset-0 origin-bottom-left -rotate-[5deg] scale-[0.96] overflow-hidden rounded-[10px] border-[3px] border-white bg-stone-100 shadow-sm">
+          <img src={behind[0].url} alt="" aria-hidden="true" loading="lazy" className="h-full w-full object-cover" />
+        </div>
+      )}
+      <div className="absolute inset-0 overflow-hidden rounded-[10px] border-[3px] border-white shadow-md">
+        <FadeImage
+          src={cover.url}
+          alt={title}
+          eager
+          className="transition-transform duration-700 group-hover:scale-105"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Warm an image into the browser cache without blocking UI.
+ * Important: this is intentionally fire-and-forget. The Team Archive opens
+ * the lightbox immediately, so event links must behave the same way.
+ */
+const warmImage = (src: string) => {
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
+};
+/* ------------------------------------------------------------------ */
 /*  Gallery page                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -729,8 +830,10 @@ const nextDraftKey = () => `draft-${Date.now()}-${draftCounter++}`;
 export default function Gallery() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [activeType, setActiveType] = useState<"all" | ArchiveType>("all");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -745,6 +848,7 @@ export default function Gallery() {
   const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [linkedEventNotFound, setLinkedEventNotFound] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addMoreInputRef = useRef<HTMLInputElement>(null);
   const touchStartXRef = useRef<number | null>(null);
@@ -773,10 +877,14 @@ export default function Gallery() {
   };
 
   const refreshMemories = async () => {
-    const response = await fetch("/api/photos?category=gallery");
-    if (response.ok) {
-      const data: PhotoRow[] = await response.json();
-      setMemories(groupRowsIntoMemories(data));
+    try {
+      const response = await fetch("/api/photos?category=gallery");
+      if (response.ok) {
+        const data: PhotoRow[] = await response.json();
+        setMemories(groupRowsIntoMemories(data));
+      }
+    } finally {
+      setIsInitialLoading(false);
     }
   };
 
@@ -784,6 +892,66 @@ export default function Gallery() {
     refreshMemories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ---------------------- link-in from the Events page --------------------- */
+  // The Events page links here as `${TEAM_ARCHIVE_PATH}?event=<title>`. On
+  // arrival we match that title against a memory (case-insensitive), force
+  // the category filter to "all" so the match can't be hidden by whatever
+  // filter happens to be selected, and open its lightbox immediately.
+  //
+  // This used to also scrollIntoView() the card first and open the lightbox
+  // after a fixed setTimeout — that was the source of the "navigates to the
+  // wrong part of the page" / "doesn't work" bug: client-side route changes
+  // don't reset scroll position on their own, so the page could still be
+  // sitting wherever the *previous* page had scrolled to when this effect
+  // ran, and scrollIntoView on a card that hadn't fully laid out yet (or a
+  // title that didn't match) could leave the user stranded. Since the
+  // lightbox is a `position: fixed` overlay covering the whole viewport,
+  // background scroll position doesn't actually matter to what's on
+  // screen — resetting scroll to the top and opening the lightbox
+  // synchronously is simpler and can't get stuck mid-animation.
+  useEffect(() => {
+    const eventParam = searchParams.get("event");
+    if (!eventParam || memories.length === 0) return;
+
+    if (activeType !== "all") {
+      setActiveType("all");
+      return; // effect re-runs once activeType updates, see deps below
+    }
+
+    const needle = eventParam.trim().toLowerCase();
+    const target = memories.find((m) => m.title.trim().toLowerCase() === needle);
+
+    if (!target) {
+      setLinkedEventNotFound(true);
+      return;
+    }
+
+    const index = memories
+      .flatMap((m) => m.photos.map((p) => ({ memory: m, photo: p })))
+      .findIndex((entry) => entry.memory.groupId === target.groupId);
+
+    if (index !== -1) {
+      const firstPhoto = memories
+        .flatMap((m) => m.photos.map((p) => ({ memory: m, photo: p })))
+        [index]?.photo;
+
+      if (!firstPhoto) return;
+
+      // Match the Team Archive interaction: open the lightbox immediately.
+      // Never wait for a network request or image decode before showing it.
+      window.scrollTo({ top: 0, behavior: "auto" });
+      setLightboxIndex(index);
+      warmImage(firstPhoto.url);
+
+      // The event query is only a deep-link instruction. Once it has been
+      // consumed, remove it from the address bar so closing/back navigation
+      // can never leave ?event=... behind.
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("event");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, memories, activeType]);
 
   /* ---------------------------- form lifecycle --------------------------- */
 
@@ -1016,6 +1184,57 @@ export default function Gallery() {
 
   /* ------------------------------- reordering ------------------------------ */
 
+  // Shared by both desktop drag-and-drop and the mobile move-up/move-down
+  // buttons below: applies a new order optimistically, then persists it,
+  // rolling back if the request fails.
+  const persistReorder = async (reordered: Memory[]) => {
+    const previous = memories;
+    setMemories(reordered);
+
+    // display_order is duplicated onto every photo row in a group, so the
+    // bulk reorder map needs one entry per photo, not per memory.
+    const order: Record<string, number> = {};
+    reordered.forEach((memory, index) => {
+      memory.photos.forEach((photo) => {
+        order[photo.id] = index + 1;
+      });
+    });
+
+    try {
+      const response = await fetch("/api/photos/reorder", buildAuthRequestInit({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order }),
+      }));
+      if (!response.ok) throw new Error(`Reorder API failed (${response.status})`);
+    } catch (error) {
+      console.error("Failed to persist memory order", error);
+      setMemories(previous);
+      alert("The cards were moved temporarily, but the new order could not be saved. Please try again.");
+    }
+  };
+
+  // Mobile fallback for reordering: native HTML5 drag-and-drop (used by the
+  // desktop cards below) never fires on a touchscreen, so admins on a phone
+  // had no way to reorder memories at all. These move the card one position
+  // within the *currently filtered* list, which matches what's visibly
+  // adjacent on screen regardless of which category tab is active.
+  const moveMemoryWithinFiltered = (groupId: string, direction: -1 | 1, filtered: Memory[]) => {
+    const filteredIndex = filtered.findIndex((m) => m.groupId === groupId);
+    const targetFilteredIndex = filteredIndex + direction;
+    if (filteredIndex === -1 || targetFilteredIndex < 0 || targetFilteredIndex >= filtered.length) return;
+
+    const targetGroupId = filtered[targetFilteredIndex].groupId;
+    const fullIndex = memories.findIndex((m) => m.groupId === groupId);
+    const fullTargetIndex = memories.findIndex((m) => m.groupId === targetGroupId);
+    if (fullIndex === -1 || fullTargetIndex === -1) return;
+
+    const next = [...memories];
+    [next[fullIndex], next[fullTargetIndex]] = [next[fullTargetIndex], next[fullIndex]];
+    const reordered = next.map((m, i) => ({ ...m, displayOrder: i + 1 }));
+    persistReorder(reordered);
+  };
+
   const handleCardDragStart = (e: React.DragEvent, groupId: string) => {
     if (!isAdmin) return;
     setDraggedGroupId(groupId);
@@ -1057,31 +1276,8 @@ export default function Gallery() {
     next.splice(targetIndex, 0, moved);
     const reordered = next.map((m, i) => ({ ...m, displayOrder: i + 1 }));
 
-    const previous = memories;
-    setMemories(reordered);
     setDraggedGroupId(null);
-
-    // display_order is duplicated onto every photo row in a group, so the
-    // bulk reorder map needs one entry per photo, not per memory.
-    const order: Record<string, number> = {};
-    reordered.forEach((memory, index) => {
-      memory.photos.forEach((photo) => {
-        order[photo.id] = index + 1;
-      });
-    });
-
-    try {
-      const response = await fetch("/api/photos/reorder", buildAuthRequestInit({
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order }),
-      }));
-      if (!response.ok) throw new Error(`Reorder API failed (${response.status})`);
-    } catch (error) {
-      console.error("Failed to persist memory order", error);
-      setMemories(previous);
-      alert("The cards were moved temporarily, but the new order could not be saved. Please try again.");
-    }
+    await persistReorder(reordered);
   };
 
   const handleCardDragEnd = () => {
@@ -1102,7 +1298,14 @@ export default function Gallery() {
     memory.photos.map((photo) => ({ memory, photo })),
   );
 
-  const closeLightbox = () => setLightboxIndex(null);
+  const closeLightbox = () => {
+    setLightboxIndex(null);
+    if (searchParams.has("event")) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("event");
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
   const showPrev = useCallback(
     () => setLightboxIndex((i) => (i === null ? null : (i - 1 + lightboxSequence.length) % lightboxSequence.length)),
     [lightboxSequence.length],
@@ -1114,7 +1317,14 @@ export default function Gallery() {
 
   const openLightboxForMemory = (memory: Memory) => {
     const index = lightboxSequence.findIndex((entry) => entry.photo.id === memory.photos[0].id);
-    setLightboxIndex(index === -1 ? 0 : index);
+    if (index === -1) {
+      setLightboxIndex(0);
+      return;
+    }
+
+    // Open first, then warm the image in the background. Do not await anything.
+    setLightboxIndex(index);
+    warmImage(memory.photos[0].url);
   };
 
   useEffect(() => {
@@ -1132,7 +1342,40 @@ export default function Gallery() {
     setLightboxIndex(null);
   }, [activeType]);
 
+  // The grid only ever fetches the 1–4 photos actually shown in a card's
+  // collage tile, so any photo beyond that — or simply the next/previous
+  // one in the lightbox — has never been requested by the browser yet.
+  // Warm the current photo and its neighbors in the background. This never
+  // blocks opening or navigation; it only improves subsequent next/prev taps.
+  useEffect(() => {
+    if (lightboxIndex === null || lightboxSequence.length === 0) return;
+
+    const preloadAt = (offset: number) => {
+      const target =
+        lightboxSequence[
+          (lightboxIndex + offset + lightboxSequence.length) % lightboxSequence.length
+        ];
+      if (!target) return;
+      warmImage(target.photo.url);
+    };
+
+    // Warm the current image as well as both neighbours. The current image is
+    // especially important when the lightbox was opened directly from Events.
+    preloadAt(0);
+    if (lightboxSequence.length > 1) {
+      preloadAt(1);
+      preloadAt(-1);
+    }
+  }, [lightboxIndex, lightboxSequence]);
+
+  // Track the photo that has actually finished loading. Using the photo id
+  // instead of resetting a boolean in an effect avoids a race where a cached
+  // first image fires onLoad before the reset effect runs.
+  const [loadedLightboxPhotoId, setLoadedLightboxPhotoId] = useState<string | null>(null);
+
   const lightboxEntry = lightboxIndex !== null ? lightboxSequence[lightboxIndex] : null;
+  const lightboxImageLoaded =
+    lightboxEntry !== null && loadedLightboxPhotoId === lightboxEntry.photo.id;
   const lightboxTypeMeta = lightboxEntry ? getArchiveTypeMeta(lightboxEntry.memory.type) : null;
   const lightboxPhotoPosition = lightboxEntry
     ? lightboxEntry.memory.photos.findIndex((p) => p.id === lightboxEntry.photo.id)
@@ -1144,10 +1387,6 @@ export default function Gallery() {
         <div className="absolute top-1/4 right-0 w-[800px] h-[800px] bg-brand-maroon rounded-full blur-[160px]" />
       </div>
 
-      {/* FIX #3: the wrapper below now scales its horizontal padding up at
-          lg/xl so the header content (pill, tabs, button) fills more of the
-          width on large screens instead of leaving a big empty gutter next
-          to the full-bleed card grid underneath it. */}
       <div className="max-w-7xl mx-auto relative z-10">
         <motion.div
           initial={{ y: 24, opacity: 0 }}
@@ -1155,6 +1394,13 @@ export default function Gallery() {
           viewport={{ once: true }}
           className="rounded-[1.75rem] border border-brand-maroon/10 bg-white px-3 py-4 shadow-[0_30px_90px_-30px_rgba(91,63,212,0.22)] sm:px-5 sm:py-6 lg:px-10 lg:py-10 xl:px-14 xl:py-12"
         >
+          {linkedEventNotFound && (
+            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+              We followed a link from an event, but couldn't find a matching memory here yet — it may not have
+              photos in the archive with the exact same title.
+            </div>
+          )}
+
           {/* Header */}
           <div className="mb-6 sm:mb-8">
             <div className="text-center">
@@ -1190,8 +1436,6 @@ export default function Gallery() {
               transition={{ delay: 0.15 }}
               className="mt-5 flex flex-col items-center gap-4 sm:mt-6 sm:gap-5"
             >
-              {/* FIX #3: bigger padding/text at lg so the pill doesn't look
-                  tiny relative to the wider header on desktop. */}
               <div className="inline-flex max-w-full items-center gap-2.5 rounded-full border border-brand-maroon/10 bg-[#fff8f5] px-5 py-2.5 shadow-[0_14px_34px_-24px_rgba(139,29,59,0.45)] sm:gap-3 sm:px-6 sm:py-3 lg:gap-4 lg:px-8 lg:py-3.5">
                 <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-brand-maroon/35" />
                 <p className="text-center text-xs font-medium leading-5 tracking-wide text-brand-maroon/75 sm:text-sm lg:text-base lg:leading-6">
@@ -1200,16 +1444,6 @@ export default function Gallery() {
                 <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-brand-maroon/35" />
               </div>
 
-              {/* Category filter — on mobile this is a fixed 4-column grid so
-                  all four options are visible on screen at once with no
-                  horizontal scrolling; from sm up it relaxes into a normal
-                  wrapping pill row since there's room to spare.
-
-                  FIX #1: the full category name is now always shown (no more
-                  shortLabel swap on mobile) — font size/tracking scale down
-                  on narrow screens instead of the text being truncated to a
-                  shorter label. FIX #3: tabs get extra padding/text size at
-                  lg so they read as full-size pills on desktop. */}
               <div className="grid w-full grid-cols-4 gap-1.5 sm:flex sm:w-auto sm:max-w-full sm:flex-wrap sm:justify-center sm:gap-2">
                 <button
                   type="button"
@@ -1257,13 +1491,25 @@ export default function Gallery() {
             </motion.div>
           </div>
 
-          {filteredMemories.length === 0 ? (
-            // On mobile the old aspect-[21/9] box was very short and wide,
-            // which squeezed the heading/copy and made them look clipped.
-            // Below `sm` we drop the aspect ratio in favor of a min-height
-            // that comfortably fits the (smaller) icon/text, and let the
-            // wide letterboxed look return from `sm` up where there's
-            // enough width for it.
+          {isInitialLoading ? (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-7 lg:grid-cols-3 lg:gap-8">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="animate-pulse overflow-hidden rounded-[1.5rem] border border-brand-maroon/10 bg-white p-3 pt-0 sm:rounded-[1.75rem] sm:p-4 sm:pt-0"
+                >
+                  <div className="-mx-3 mb-3 h-1.5 bg-stone-100 sm:-mx-4 sm:mb-4" />
+                  <div className="aspect-[3/2] w-full rounded-[1.1rem] bg-stone-100 sm:rounded-[1.35rem]" />
+                  <div className="px-1 pb-1 pt-3.5 sm:px-1.5 sm:pb-1.5 sm:pt-4">
+                    <div className="h-5 w-28 rounded-full bg-stone-100" />
+                    <div className="mt-3 h-5 w-4/5 rounded bg-stone-100" />
+                    <div className="mt-2 h-5 w-2/3 rounded bg-stone-100" />
+                    <div className="mt-3 h-3 w-24 rounded bg-stone-100" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredMemories.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
@@ -1291,19 +1537,19 @@ export default function Gallery() {
               </div>
             </motion.div>
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(230px,1fr))] sm:gap-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-7 lg:grid-cols-3 lg:gap-8">
               <AnimatePresence>
                 {filteredMemories.map((memory, index) => {
                   const isDragged = draggedGroupId === memory.groupId;
                   const isDropTarget = dragOverGroupId === memory.groupId;
                   const typeMeta = getArchiveTypeMeta(memory.type);
                   const TypeIcon = typeMeta.icon;
-                  const cover = memory.photos[0];
                   const photoCount = memory.photos.length;
 
                   return (
                     <motion.div
                       key={memory.groupId}
+                      id={`memory-${memory.groupId}`}
                       layout
                       initial={{ opacity: 0, y: 16 }}
                       animate={{ opacity: 1, y: 0, rotate: getCardTilt(index) }}
@@ -1316,40 +1562,30 @@ export default function Gallery() {
                       onDrop={(e) => handleCardDrop(e as any, memory.groupId)}
                       onDragLeave={() => setDragOverGroupId(null)}
                       onDragEnd={handleCardDragEnd}
-                      className={`group relative flex flex-col overflow-hidden rounded-[1.35rem] border bg-white p-2 pt-0 select-none shadow-[0_14px_34px_-16px_rgba(91,63,212,0.28)] transition-shadow duration-300 sm:rounded-[1.5rem] sm:p-3 sm:pt-0 ${typeMeta.glowClass} ${
+                      className={`group relative flex flex-col overflow-hidden rounded-[1.5rem] border bg-white p-3 pt-0 select-none shadow-[0_14px_34px_-16px_rgba(91,63,212,0.28)] transition-shadow duration-300 sm:rounded-[1.75rem] sm:p-4 sm:pt-0 ${typeMeta.glowClass} ${
                         isDragged
                           ? "opacity-50 border-brand-maroon"
                           : isDropTarget
                             ? "border-[#5B3FD4] ring-2 ring-[#5B3FD4]/20"
                             : "border-brand-maroon/10"
-                      } ${isAdmin ? "cursor-grab active:cursor-grabbing" : ""}`}
+                      } ${isAdmin ? "sm:cursor-grab sm:active:cursor-grabbing" : ""}`}
                     >
-                      <span aria-hidden="true" className={`-mx-2 mb-2 block h-1.5 sm:-mx-3 sm:mb-3 ${typeMeta.accentClass}`} />
+                      <span aria-hidden="true" className={`-mx-3 mb-3 block h-1.5 sm:-mx-4 sm:mb-4 ${typeMeta.accentClass}`} />
 
                       <div className="relative">
                         <button
                           type="button"
                           onClick={() => openLightboxForMemory(memory)}
-                          className="relative block aspect-[4/5] w-full overflow-hidden rounded-[1rem] bg-stone-100 sm:rounded-[1.1rem]"
+                          className="relative block aspect-[3/2] w-full overflow-hidden rounded-[1.1rem] bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-maroon focus-visible:ring-offset-2 sm:rounded-[1.35rem]"
                           aria-label={`View ${memory.title} full size`}
                         >
-                          <motion.img
-                            src={cover.url}
-                            alt={memory.title}
-                            loading="lazy"
-                            className="h-full w-full object-cover"
-                            initial={{ scale: 1.22 }}
-                            whileInView={{ scale: 1 }}
-                            viewport={{ once: true, amount: 0.4 }}
-                            transition={{ duration: 1, ease: "easeOut" }}
-                            whileHover={{ scale: 1.08 }}
-                          />
+                          <MemoryCoverCollage photos={memory.photos} title={memory.title} />
 
                           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-brand-maroon/0 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:from-brand-maroon/50 group-hover:opacity-100" />
 
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-300 group-hover:opacity-100">
-                            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-brand-maroon shadow-md">
-                              <Maximize2 size={16} />
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-brand-maroon shadow-md">
+                              <Maximize2 size={17} />
                             </span>
                           </div>
 
@@ -1361,7 +1597,7 @@ export default function Gallery() {
                           )}
 
                           {isAdmin && (
-                            <div className="pointer-events-none absolute bottom-2.5 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-dashed border-white/40 bg-stone-950/60 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
+                            <div className="pointer-events-none absolute bottom-2.5 left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-dashed border-white/40 bg-stone-950/60 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 sm:flex">
                               <GripVertical size={11} />
                               Drag to reorder
                             </div>
@@ -1369,7 +1605,39 @@ export default function Gallery() {
                         </button>
 
                         {isAdmin && (
-                          <div className="absolute right-2 top-2 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <div className="absolute right-2 top-2 flex items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                            {/* Move up/down — the only way to reorder on a touchscreen,
+                                since native HTML5 drag-and-drop (used on sm+ below)
+                                never fires on touch devices at all. Reorders within
+                                whatever category tab is currently active, matching
+                                what's visibly adjacent on screen. */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveMemoryWithinFiltered(memory.groupId, -1, filteredMemories);
+                              }}
+                              disabled={index === 0}
+                              className="rounded-full border border-brand-maroon/10 bg-white/90 p-1.5 text-brand-maroon backdrop-blur transition hover:bg-brand-maroon hover:text-white disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
+                              title="Move up"
+                              aria-label="Move this memory earlier"
+                            >
+                              <ChevronUp size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveMemoryWithinFiltered(memory.groupId, 1, filteredMemories);
+                              }}
+                              disabled={index === filteredMemories.length - 1}
+                              className="rounded-full border border-brand-maroon/10 bg-white/90 p-1.5 text-brand-maroon backdrop-blur transition hover:bg-brand-maroon hover:text-white disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
+                              title="Move down"
+                              aria-label="Move this memory later"
+                            >
+                              <ChevronDown size={13} />
+                            </button>
+
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1397,31 +1665,19 @@ export default function Gallery() {
                         )}
                       </div>
 
-                      <div className="flex flex-1 flex-col px-2 pb-2 pt-3 sm:px-2.5 sm:pb-2.5 sm:pt-4">
-                        {/* FIX #2: always render the full category label
-                            (typeMeta.label) instead of swapping to
-                            typeMeta.shortLabel on mobile. Font size/tracking
-                            drop on narrow screens so it still fits the
-                            2-column card width without truncating or
-                            wrapping awkwardly. */}
+                      <div className="flex flex-1 flex-col px-1 pb-1 pt-3.5 sm:px-1.5 sm:pb-1.5 sm:pt-4">
                         <span
-                          className={`inline-flex w-fit max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-[7px] font-bold uppercase tracking-[0.05em] sm:gap-1.5 sm:px-2.5 sm:text-[10px] sm:tracking-[0.14em] ${typeMeta.chipClass}`}
+                          className={`inline-flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.1em] sm:gap-1.5 sm:px-3 sm:text-[10px] sm:tracking-[0.14em] ${typeMeta.chipClass}`}
                         >
-                          <TypeIcon size={10} className="shrink-0 sm:hidden" />
-                          <TypeIcon size={11} className="hidden shrink-0 sm:block" />
+                          <TypeIcon size={11} className="shrink-0" />
                           {typeMeta.label}
                         </span>
 
-                        <h3 className="mt-2.5 break-words font-serif text-base font-bold leading-snug text-brand-maroon sm:text-xl md:text-2xl">
+                        <h3 className="mt-2.5 line-clamp-2 break-words font-serif text-lg font-bold leading-snug text-brand-maroon sm:mt-3 sm:text-xl">
                           {memory.title}
                         </h3>
 
-                        <span
-                          aria-hidden="true"
-                          className="mt-2 h-[3px] w-8 shrink-0 rounded-full bg-rose-300 sm:mt-2.5 sm:w-10"
-                        />
-
-                        <div className="mt-2.5 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-brand-maroon/45 sm:mt-3 sm:text-xs sm:tracking-[0.18em]">
+                        <div className="mt-auto flex items-center gap-1.5 pt-2.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-brand-maroon/45 sm:pt-3 sm:text-xs sm:tracking-[0.18em]">
                           <CalendarDays size={12} className="shrink-0 text-brand-maroon/40" aria-hidden="true" />
                           <span>{formatDisplayDate(memory.date)}</span>
                         </div>
@@ -1510,6 +1766,10 @@ export default function Gallery() {
                         value={form.title}
                         onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
                       />
+                      <p className="mt-1.5 text-[10px] text-brand-maroon/35">
+                        If this belongs to an event, use the exact same title as on the Events page — that's how the
+                        two pages link up.
+                      </p>
                     </div>
 
                     <div>
@@ -1755,14 +2015,34 @@ export default function Gallery() {
               initial={{ opacity: 0, scale: 0.97 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.2 }}
-              className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[1.75rem] bg-stone-900 shadow-2xl"
+              className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#171315] shadow-[0_30px_100px_-20px_rgba(0,0,0,0.75)] sm:rounded-[2rem]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex-1 overflow-y-auto">
-                <div className="flex items-center justify-center bg-black">
+                <div className="relative flex min-h-[46vh] items-center justify-center bg-black/80 sm:min-h-[58vh]">
+                  {!lightboxImageLoaded && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center"
+                      aria-hidden="true"
+                    >
+                      <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/25 border-t-white/80" />
+                    </div>
+                  )}
                   <img
+                    key={lightboxEntry.photo.id}
                     src={lightboxEntry.photo.url}
                     alt={lightboxEntry.memory.title}
+                    loading="eager"
+                    fetchPriority="high"
+                    onLoad={(event) => {
+                      setLoadedLightboxPhotoId(lightboxEntry.photo.id);
+                    }}
+                    onError={() => {
+                      // Do not leave the lightbox stuck behind the spinner if
+                      // the image request fails. The browser will still show
+                      // its normal broken-image state.
+                      setLoadedLightboxPhotoId(lightboxEntry.photo.id);
+                    }}
                     className="max-h-[60vh] w-full object-contain sm:max-h-[70vh]"
                   />
                 </div>
@@ -1781,7 +2061,7 @@ export default function Gallery() {
                   </div>
                 )}
 
-                <div className="px-6 py-6 text-center sm:px-10 sm:py-8">
+                <div className="border-t border-white/10 bg-[#1c1719] px-6 py-5 text-center sm:px-10 sm:py-7">
                   <span
                     className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${lightboxTypeMeta.chipClass}`}
                   >
@@ -1799,7 +2079,7 @@ export default function Gallery() {
                     )}
                   </div>
 
-                  <h3 className="mt-2 font-serif text-2xl text-white sm:text-3xl">{lightboxEntry.memory.title}</h3>
+                  <h3 className="mx-auto mt-2 max-w-3xl font-serif text-2xl leading-tight text-white sm:text-3xl">{lightboxEntry.memory.title}</h3>
                 </div>
               </div>
             </motion.div>
@@ -1807,5 +2087,5 @@ export default function Gallery() {
         )}
       </AnimatePresence>
     </section>
-  );
+  )
 }
