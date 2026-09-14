@@ -6,6 +6,7 @@ import {
   X,
   Trash2,
   Pencil,
+  Upload,
   Star,
   Eye,
   EyeOff,
@@ -21,6 +22,8 @@ import {
 import { buildAuthRequestInit } from "../auth/fetchWithAuth";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import JourneyTimeline from "./JourneyTimeline";
+import JourneyVideo from "./JourneyVideo";
 
 interface AboutPhoto {
   id: string;
@@ -28,6 +31,8 @@ interface AboutPhoto {
   caption: string;
   is_featured: boolean;
 }
+
+const HERO_CACHE_KEY = "ikshana-about-hero";
 
 /* ------------------------------------------------------------------ */
 /*  Journey timeline — admin-editable                                  */
@@ -113,16 +118,6 @@ const DEFAULT_MILESTONES: Milestone[] = [
 
 const MILESTONES_STORAGE_KEY = "ikshana-journey-milestones";
 
-// Interpolates the timeline dot color from a young, light rose to the full
-// brand maroon based on position — a small visual echo of the foundation's
-// growth, computed automatically so nobody has to pick colors by hand when
-// adding a milestone.
-// Every milestone dot, icon chip, and year now share one consistent brand
-// color instead of interpolating light-to-dark across the timeline — the
-// fading effect made early years look washed out compared to later ones.
-const TIMELINE_COLOR = "#7a1f2d";
-const getDotColor = (_index: number, _total: number) => TIMELINE_COLOR;
-
 const EMPTY_MILESTONE_FORM = { year: "", title: "", description: "", iconKey: "sprout" as MilestoneIconKey };
 
 /* ------------------------------------------------------------------ */
@@ -167,22 +162,22 @@ const STATS: {
     label: "Volunteers",
     value: 100,
     icon: Users,
-    iconColor: "text-amber-600",
-    iconBg: "bg-amber-100",
+    iconColor: "text-brand-maroon",
+    iconBg: "bg-stone-50",
   },
   {
     label: "Donation Drives",
     value: 30,
     icon: HandHeart,
-    iconColor: "text-rose-600",
-    iconBg: "bg-rose-100",
+    iconColor: "text-brand-maroon",
+    iconBg: "bg-stone-50",
   },
   {
     label: "Awareness Programs",
     value: 5,
     icon: Sparkles,
-    iconColor: "text-teal-600",
-    iconBg: "bg-teal-100",
+    iconColor: "text-brand-maroon",
+    iconBg: "bg-stone-50",
   },
 ];
 
@@ -199,47 +194,141 @@ export default function About() {
   const [showFeaturedImage, setShowFeaturedImage] = useState(true);
   const [bigPhoto, setBigPhoto] = useState<string | null>(null);
 
+  // Load the hero independently from the larger About photo collection so the
+  // top image can appear as soon as its own request finishes.
+  const [heroDataLoading, setHeroDataLoading] = useState(true);
+  const [heroImgLoaded, setHeroImgLoaded] = useState(false);
+  const [heroUploading, setHeroUploading] = useState(false);
+  const heroFileInputRef = useRef<HTMLInputElement>(null);
+
   const [milestones, setMilestones] = useState<Milestone[]>(DEFAULT_MILESTONES);
   const [isMilestoneFormOpen, setIsMilestoneFormOpen] = useState(false);
   const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null);
   const [milestoneForm, setMilestoneForm] = useState(EMPTY_MILESTONE_FORM);
 
-  const fetchPhotos = async () => {
+  const warmHeroImage = (url: string) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+  };
+
+  const fetchHeroPhoto = async () => {
     try {
-      const response = await fetch("/api/photos");
+      // Reuse the last known hero immediately on repeat visits, then refresh
+      // it in the background.
+      try {
+        const cached = window.sessionStorage.getItem(HERO_CACHE_KEY);
+        if (cached) {
+          const hero = JSON.parse(cached);
+          if (hero?.url) {
+            setFeaturedImage(hero.url);
+            setFeaturedPhotoId(hero.id ?? null);
+            setBigPhoto(hero.url);
+            setHeroImgLoaded(true);
+            warmHeroImage(hero.url);
+          }
+        }
+      } catch {}
+
+      const response = await fetch("/api/photos?category=hero", { cache: "force-cache" });
       if (response.ok) {
         const data = await response.json();
-        // Keep the archive limited to 'about' photos
-        const aboutPhotos = data
-          .filter((p: any) => p.category === 'about')
-          .map((p: any) => ({ ...p, caption: p.caption || p.title || "About Photo" }));
-        setPhotos(aboutPhotos);
-
-        // Only use `hero` images for the top featured banner. This prevents
-        // about/team photos from showing above the mission/vision section.
-        const hero = data.find((p: any) => p.category === 'hero');
-        if (hero) {
+        const hero = Array.isArray(data) ? data[0] : null;
+        if (hero?.url) {
           setFeaturedImage(hero.url);
           setFeaturedPhotoId(hero.id);
+          setBigPhoto(hero.url);
+          try {
+            window.sessionStorage.setItem(
+              HERO_CACHE_KEY,
+              JSON.stringify({ id: hero.id, url: hero.url }),
+            );
+          } catch {}
+          warmHeroImage(hero.url);
         } else {
           setFeaturedImage(null);
           setFeaturedPhotoId(null);
+          setBigPhoto(null);
+          try { window.sessionStorage.removeItem(HERO_CACHE_KEY); } catch {}
         }
+      }
+    } catch (e) {
+      console.error("Failed to fetch hero photo", e);
+    } finally {
+      setHeroDataLoading(false);
+    }
+  };
 
-        // big photo preference: hero > first about
-        if (hero) setBigPhoto(hero.url);
-        else if (aboutPhotos.length) setBigPhoto(aboutPhotos[0].url);
-        else setBigPhoto(null);
+  // Admin-only: replace the current hero image with a new image.
+  // Upload the new image first, then remove the previous hero so a failed
+  // upload never leaves the page without a hero image.
+  const handleHeroFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setHeroUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("title", "Hero Image");
+      formData.append("category", "hero");
+      formData.append("date", new Date().toLocaleDateString());
+      formData.append("is_featured", "true");
+
+      const response = await fetch("/api/photos", buildAuthRequestInit({
+        method: "POST",
+        body: formData,
+      }));
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Upload failed");
+      }
+
+      const previousHeroId = featuredPhotoId;
+      await fetchPhotos();
+
+      if (previousHeroId) {
+        fetch(`/api/photos/${previousHeroId}`, buildAuthRequestInit({ method: "DELETE" })).catch((err) =>
+          console.warn("New hero image uploaded, but the previous hero could not be removed automatically.", err),
+        );
+      }
+    } catch (error) {
+      console.error("Failed to replace hero image", error);
+      alert(error instanceof Error ? error.message : "Something went wrong replacing the hero image.");
+    } finally {
+      setHeroUploading(false);
+    }
+  };
+
+  const fetchAboutPhotos = async () => {
+    try {
+      const response = await fetch("/api/photos?category=about");
+      if (response.ok) {
+        const data = await response.json();
+        const aboutPhotos = (Array.isArray(data) ? data : [])
+          .map((p: any) => ({ ...p, caption: p.caption || p.title || "About Photo" }));
+        setPhotos(aboutPhotos);
+        setBigPhoto((prev) => prev ?? (aboutPhotos.length ? aboutPhotos[0].url : null));
       }
     } catch (e) {
       console.error("Failed to fetch about photos", e);
     }
-  }; 
+  };
 
-  // Load photos from API on mount
+  const fetchPhotos = async () => {
+    await Promise.all([fetchHeroPhoto(), fetchAboutPhotos()]);
+  };
+
+  // The hero request is intentionally separate and starts immediately on mount.
   useEffect(() => {
     fetchPhotos();
   }, []);
+
+  useEffect(() => {
+    if (!featuredImage) setHeroImgLoaded(false);
+  }, [featuredImage]);
 
   // Load journey milestones: try the backend first, fall back to whatever
   // was last saved locally, and fall back again to the hardcoded defaults.
@@ -380,6 +469,8 @@ export default function About() {
     : [];
   const marqueeDuration = Math.max(22, marqueePhotos.length * 2.5);
 
+  const heroFullyLoaded = !heroDataLoading && (!featuredImage || heroImgLoaded);
+
   return (
     <section id="about" className="pt-24 pb-8 px-4 sm:pt-32 sm:pb-14 sm:px-6 bg-white overflow-hidden">
       <style>{`
@@ -397,12 +488,14 @@ export default function About() {
         }
       `}</style>
 
-      {featuredImage && showFeaturedImage && (
+      {featuredImage && <link rel="preload" as="image" href={featuredImage} fetchPriority="high" />}
+
+      {showFeaturedImage && (heroDataLoading || featuredImage) && (
         <motion.div
           initial={{ y: 30, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           viewport={{ once: true }}
-          className="relative -mx-4 mb-8 sm:-mx-6 sm:mb-12 lg:-mx-10"
+          className="relative -mx-4 mb-6 sm:-mx-6 sm:mb-8 lg:-mx-10"
         >
           {/* No forced aspect ratio and no fixed height: the box's height is
               simply whatever the image's own natural aspect ratio produces
@@ -413,37 +506,97 @@ export default function About() {
               viewport height. loading="eager" + fetchPriority="high" keep
               this, the very first image on the page, from popping in late. */}
           <div className="relative w-full overflow-hidden rounded-b-[2rem] bg-brand-maroon/5 sm:rounded-b-[2.5rem] sm:shadow-2xl">
+            {!heroFullyLoaded && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 aspect-[16/9] bg-gradient-to-br from-brand-maroon/10 via-brand-maroon/5 to-brand-maroon/10 animate-pulse sm:aspect-[21/9]"
+              />
+            )}
             <div className="absolute right-4 top-4 z-10 flex gap-2 sm:right-6 sm:top-6">
               {isAdmin && featuredImage && (
-                <button
-                  onClick={() => setShowFeaturedImage(!showFeaturedImage)}
-                  className="p-2 rounded-lg bg-white/90 text-brand-maroon shadow-lg backdrop-blur-sm transition-colors hover:bg-white"
-                  title={showFeaturedImage ? "Hide featured image" : "Show featured image"}
-                >
-                  {showFeaturedImage ? <Eye size={18} /> : <EyeOff size={18} />}
-                </button>
+                <>
+                  <input
+                    ref={heroFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleHeroFileSelected}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => heroFileInputRef.current?.click()}
+                    disabled={heroUploading}
+                    className="p-2 rounded-lg bg-white/90 text-brand-maroon shadow-lg backdrop-blur-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Edit / replace hero image"
+                    aria-label="Edit / replace hero image"
+                  >
+                    {heroUploading ? (
+                      <span className="block h-[18px] w-[18px] animate-spin rounded-full border-2 border-brand-maroon/25 border-t-brand-maroon" />
+                    ) : (
+                      <Pencil size={18} />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFeaturedImage(!showFeaturedImage)}
+                    disabled={heroUploading}
+                    className="p-2 rounded-lg bg-white/90 text-brand-maroon shadow-lg backdrop-blur-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    title={showFeaturedImage ? "Hide featured image" : "Show featured image"}
+                  >
+                    {showFeaturedImage ? <Eye size={18} /> : <EyeOff size={18} />}
+                  </button>
+                </>
               )}
               {isAdmin && featuredImage && featuredPhotoId && (
                 <button
+                  type="button"
                   onClick={() => removePhoto(featuredPhotoId)}
-                  className="p-2 rounded-lg bg-red-600/90 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-red-600"
+                  disabled={heroUploading}
+                  className="p-2 rounded-lg bg-red-600/90 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
                   title="Remove featured image"
                 >
                   <Trash2 size={18} />
                 </button>
               )}
             </div>
-            <img
-              src={featuredImage}
-              alt="About Featured"
-              loading="eager"
-              fetchPriority="high"
-              decoding="async"
-              className="relative block h-auto w-full"
-              referrerPolicy="no-referrer"
-            />
+            {featuredImage && (
+              <img
+                src={featuredImage}
+                alt="Ikshana Foundation hero"
+                loading="eager"
+                fetchPriority="high"
+                decoding="async"
+                onLoad={() => setHeroImgLoaded(true)}
+                className="relative block h-auto w-full transition-opacity duration-300"
+                style={{ opacity: heroImgLoaded ? 1 : 0 }}
+                referrerPolicy="no-referrer"
+              />
+            )}
           </div>
         </motion.div>
+      )}
+
+      {isAdmin && !heroDataLoading && !featuredImage && (
+        <div className="mx-auto mb-8 max-w-[96rem] px-4 sm:px-6 lg:px-10">
+          <input
+            ref={heroFileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleHeroFileSelected}
+          />
+          <button
+            type="button"
+            onClick={() => heroFileInputRef.current?.click()}
+            disabled={heroUploading}
+            className="flex w-full flex-col items-center justify-center gap-3 rounded-[2rem] border-2 border-dashed border-brand-maroon/20 bg-brand-maroon/[0.03] py-12 text-brand-maroon/60 transition hover:border-brand-maroon/40 hover:text-brand-maroon disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Upload size={26} />
+            <span className="text-xs font-bold uppercase tracking-widest">
+              {heroUploading ? "Uploading..." : "Add a hero image"}
+            </span>
+          </button>
+        </div>
       )}
 
       <div className="relative mx-auto max-w-[96rem]">
@@ -480,7 +633,7 @@ export default function About() {
             initial={{ y: 30, opacity: 0 }}
             whileInView={{ y: 0, opacity: 1 }}
             viewport={{ once: true }}
-            className="mb-20 sm:mb-28"
+            className="mb-10 sm:mb-14"
           >
             <div className="mb-8 flex flex-nowrap items-center justify-center gap-2 sm:mb-10 sm:gap-4">
               <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-brand-maroon/20 bg-brand-maroon/[0.07] px-3.5 py-2.5 text-[11px] font-medium text-brand-maroon sm:gap-2 sm:px-5 sm:py-3 sm:text-base">
@@ -506,8 +659,8 @@ export default function About() {
                     key={stat.label}
                     className="flex flex-col items-center gap-2 px-2 py-7 text-center sm:gap-3.5 sm:py-11"
                   >
-                    <span className={`flex h-9 w-9 items-center justify-center rounded-full sm:h-12 sm:w-12 ${stat.iconBg}`}>
-                      <Icon size={18} className={`${stat.iconColor} sm:h-6 sm:w-6`} strokeWidth={2.25} />
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-full border border-brand-maroon/10 sm:h-12 sm:w-12 ${stat.iconBg}`}>
+                      <Icon size={18} className={`${stat.iconColor} sm:h-6 sm:w-6`} strokeWidth={2} />
                     </span>
                     <h3 className="font-sans text-3xl font-medium not-italic leading-none tracking-tight text-brand-maroon [font-variant-numeric:tabular-nums] sm:text-5xl lg:text-6xl">
                       <CountUpStat value={stat.value} suffix="+" />
@@ -521,163 +674,56 @@ export default function About() {
             </div>
           </motion.div>
 
-          {/* The Ikshana Journey — signature timeline, 2021 to today */}
-          <div className="relative mb-20 sm:mb-28">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -left-10 top-40 h-[420px] w-[420px] rounded-full bg-brand-maroon opacity-[0.03] blur-[140px]"
-            />
-
+          {/* The Ikshana Journey */}
+          <div className="relative mb-12 sm:mb-16">
             <motion.div
               initial={{ y: 20, opacity: 0 }}
               whileInView={{ y: 0, opacity: 1 }}
               viewport={{ once: true }}
-              className="relative mb-12 sm:mb-16"
+              className="relative mb-8 sm:mb-10"
             >
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <div className="mb-4 flex items-center gap-3">
-                    <span className="h-[3px] w-12 rounded-full bg-brand-maroon/60" />
-                    <span className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-maroon sm:text-base">
-                      Our Story
-                    </span>
-                  </div>
-                  <h2 className="font-serif text-4xl italic text-brand-maroon sm:text-5xl">The Ikshana Journey</h2>
-                </div>
-
-                {isAdmin && (
-                  <button
-                    onClick={openAddMilestone}
-                    className="inline-flex items-center gap-2 self-start rounded-full bg-brand-maroon px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900 sm:self-auto"
-                  >
-                    <Plus size={15} />
-                    Add Milestone
-                  </button>
-                )}
+              <div className="mb-4 flex items-center gap-3">
+                <span className="h-[3px] w-12 rounded-full bg-brand-maroon/60" />
+                <span className="text-xs font-bold uppercase tracking-[0.22em] text-brand-maroon sm:text-sm">
+                  Our Story
+                </span>
               </div>
-              <p className="mt-4 max-w-none text-base leading-7 text-brand-maroon/75 sm:text-lg sm:leading-8">
-                Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
-              </p>
+
+              <h2 className="font-serif text-[2.15rem] italic leading-[1.05] tracking-[-0.03em] text-brand-maroon sm:text-5xl lg:text-[3.25rem]">
+                The Ikshana Journey
+              </h2>
+
+              <div className="mt-5 flex items-stretch gap-4 border-l-4 border-brand-maroon/25 pl-5 sm:mt-6 sm:gap-6 sm:pl-8">
+                <p className="w-full font-serif text-lg font-medium leading-relaxed text-brand-maroon sm:text-xl lg:text-2xl lg:leading-relaxed">
+                  Five years, one idea carried forward by volunteers: show up, keep showing up, and let the community lead.
+                </p>
+              </div>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={openAddMilestone}
+                  className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand-maroon px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-brand-maroon/20 transition hover:bg-stone-900"
+                >
+                  <Plus size={15} />
+                  Add Milestone
+                </button>
+              )}
             </motion.div>
 
-            <div className="relative">
-              {/* Spine: a single solid brand-maroon line with a soft glow,
-                  capped top and bottom with small circles so it reads as a
-                  deliberately designed timeline rather than a stray rule.
-                  Every node along it shares one color (TIMELINE_COLOR)
-                  rather than fading in from a lighter tint at 2021. */}
-              <div
-                aria-hidden="true"
-                className="absolute left-4 top-2 bottom-2 w-[3px] rounded-full sm:left-1/2 sm:-translate-x-1/2"
-                style={{
-                  backgroundColor: TIMELINE_COLOR,
-                  opacity: 0.35,
-                  boxShadow: `0 0 16px 0 ${TIMELINE_COLOR}33`,
-                }}
-              />
-              <span
-                aria-hidden="true"
-                className="absolute left-4 top-2 z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full sm:left-1/2"
-                style={{ backgroundColor: TIMELINE_COLOR }}
-              />
-
-              <div className="space-y-6 sm:space-y-8">
-                {milestones.map((milestone, index) => {
-                  const Icon = MILESTONE_ICONS[milestone.iconKey] ?? Sparkles;
-                  const isRight = index % 2 === 1;
-                  const dotColor = getDotColor(index, milestones.length);
-
-                  return (
-                    <motion.div
-                      key={milestone.id}
-                      initial={{ y: 24, opacity: 0 }}
-                      whileInView={{ y: 0, opacity: 1 }}
-                      viewport={{ once: true, margin: "-60px" }}
-                      transition={{ duration: 0.5, delay: 0.05 }}
-                      className={`relative flex flex-col gap-2 pl-14 sm:flex-row sm:items-center sm:gap-0 sm:pl-0 ${
-                        isRight ? "sm:flex-row-reverse" : ""
-                      }`}
-                    >
-                      {/* Dot */}
-                      <div
-                        aria-hidden="true"
-                        className="absolute left-4 top-3 z-10 flex h-11 w-11 -translate-x-1/2 items-center justify-center rounded-full border-[3px] border-white shadow-lg sm:left-1/2 sm:top-1/2 sm:h-[3.25rem] sm:w-[3.25rem] sm:-translate-y-1/2"
-                        style={{ backgroundColor: dotColor }}
-                      >
-                        <Icon size={19} className="text-white sm:h-[22px] sm:w-[22px]" strokeWidth={2.25} />
-                      </div>
-
-                      {/* Connector stub linking the dot straight to its card so
-                          the two sides of the zigzag don't feel disconnected */}
-                      <span
-                        aria-hidden="true"
-                        className={`absolute top-1/2 hidden h-[3px] w-8 -translate-y-1/2 sm:block ${
-                          isRight ? "left-1/2" : "right-1/2"
-                        }`}
-                        style={{ backgroundColor: dotColor }}
-                      />
-
-                      <div className={`sm:w-1/2 ${isRight ? "sm:pl-10" : "sm:pr-10"}`}>
-                        <div className="group relative overflow-hidden rounded-[1.75rem] border border-brand-maroon/10 bg-white p-7 shadow-[0_18px_40px_-26px_rgba(122,31,45,0.28)] transition-all hover:-translate-y-1.5 hover:shadow-[0_28px_54px_-22px_rgba(122,31,45,0.32)] sm:rounded-[2.25rem] sm:p-9">
-                          {/* Soft color bloom in the corner — adds richness
-                              without any extra text or labels */}
-                          <span
-                            aria-hidden="true"
-                            className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full blur-3xl"
-                            style={{ backgroundColor: dotColor, opacity: 0.07 }}
-                          />
-
-                          <span
-                            aria-hidden="true"
-                            className="absolute inset-x-7 top-0 h-[3px] rounded-full sm:inset-x-9"
-                            style={{ background: `linear-gradient(90deg, ${dotColor}, ${dotColor}30)` }}
-                          />
-
-                          {isAdmin && (
-                            <div className="absolute right-4 top-4 z-10 flex items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                              <button
-                                type="button"
-                                onClick={() => openEditMilestone(milestone)}
-                                className="rounded-full border border-brand-maroon/10 bg-white p-1.5 text-brand-maroon shadow-sm transition hover:bg-brand-maroon hover:text-white"
-                                title="Edit milestone"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => removeMilestone(milestone.id)}
-                                className="rounded-full border border-brand-maroon/10 bg-white p-1.5 text-brand-maroon shadow-sm transition hover:bg-brand-maroon hover:text-white"
-                                title="Delete milestone"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          )}
-
-                          <span
-                            className="relative block font-sans text-2xl font-medium not-italic tracking-tight [font-variant-numeric:tabular-nums] sm:text-4xl"
-                            style={{ color: dotColor }}
-                          >
-                            {milestone.year}
-                          </span>
-                          <h4 className="relative mt-3 text-xl font-semibold text-brand-maroon sm:text-2xl">{milestone.title}</h4>
-                          <span
-                            aria-hidden="true"
-                            className="relative mb-3 mt-1.5 block h-[3px] w-10 rounded-full"
-                            style={{ background: `linear-gradient(90deg, ${dotColor}, ${dotColor}20)` }}
-                          />
-                          <p className="relative text-sm leading-6 text-brand-maroon/90 sm:text-base sm:leading-7 md:text-lg md:leading-8">
-                            {milestone.description}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="hidden sm:block sm:w-1/2" aria-hidden="true" />
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </div>
+            <JourneyTimeline
+              milestones={milestones}
+              isAdmin={isAdmin}
+              onEdit={(id) => {
+                const milestone = milestones.find((item) => item.id === id);
+                if (milestone) openEditMilestone(milestone);
+              }}
+              onDelete={removeMilestone}
+            />
           </div>
+
+          {/* Optional origin-story video. It stays hidden for visitors until an admin configures it. */}
+          <JourneyVideo />
 
           {/* Auto-scrolling gallery of moments from the archive */}
           {marqueePhotos.length > 0 && (

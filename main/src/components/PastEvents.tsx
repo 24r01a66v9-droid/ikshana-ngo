@@ -924,13 +924,36 @@ export default function PastEvents() {
                     )}
 
                     {event.acknowledgments && (
-                      <div className="relative mt-6 flex gap-3 rounded-2xl border border-brand-maroon/[0.08] bg-brand-cream/45 px-4 py-3.5 sm:mt-7 sm:px-5 sm:py-4">
-                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-maroon text-white">
-                          <Heart size={13} fill="currentColor" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/60">With gratitude</p>
-                          <p className="mt-1.5 text-sm font-normal leading-6 text-stone-700 sm:text-[0.95rem]">{event.acknowledgments}</p>
+                      <div className="relative mt-6 overflow-hidden rounded-[1.5rem] border border-brand-maroon/[0.10] bg-gradient-to-br from-brand-cream/65 via-white to-[#fff7f5] px-4 py-4 shadow-[0_14px_34px_-26px_rgba(120,37,30,0.35)] sm:mt-7 sm:px-5 sm:py-4.5">
+                        <div
+                          aria-hidden="true"
+                          className="pointer-events-none absolute -bottom-10 -right-6 h-24 w-24 rounded-full border border-brand-maroon/[0.10]"
+                        />
+                        <div
+                          aria-hidden="true"
+                          className="pointer-events-none absolute -bottom-14 right-7 h-28 w-28 rounded-full border border-brand-maroon/[0.06]"
+                        />
+                        <div className="relative flex items-center gap-3.5 sm:gap-4">
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-maroon text-white shadow-[0_8px_20px_-10px_rgba(120,37,30,0.65)] sm:h-11 sm:w-11">
+                            <Heart size={16} fill="currentColor" strokeWidth={1.8} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="h-px w-5 bg-brand-maroon/30" />
+                              <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-brand-maroon/70 sm:text-[10px]">
+                                With gratitude
+                              </p>
+                            </div>
+                            <p className="mt-1.5 text-sm font-normal leading-6 text-stone-700 sm:text-[0.95rem] sm:leading-6">
+                              {event.acknowledgments}
+                            </p>
+                          </div>
+                          <Heart
+                            aria-hidden="true"
+                            size={34}
+                            strokeWidth={1}
+                            className="pointer-events-none absolute -bottom-1 right-2 text-brand-maroon/[0.10]"
+                          />
                         </div>
                       </div>
                     )}
