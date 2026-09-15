@@ -133,7 +133,26 @@ export default function EventAdminPanel() {
       const res = await fetch("/api/reg/admin/events", buildAuthRequestInit());
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || "Couldn't load event management.");
-      setEvents(body.events || []);
+      const loadedEvents: EventRecord[] = Array.isArray(body.events) ? body.events : [];
+      setEvents(loadedEvents);
+
+      // When the manager opens, start with the exact feature currently shown on Home.
+      // The public Home endpoint uses show_on_home=true + status=published, so use
+      // the same rule here instead of forcing the admin to pick an event manually.
+      const currentHomeEvent = loadedEvents.find(
+        (event) => Boolean(event.show_on_home) && event.status === "published",
+      );
+
+      if (currentHomeEvent) {
+        await selectEvent(currentHomeEvent);
+      } else if (loadedEvents.length > 0 && !selectedId) {
+        await selectEvent(loadedEvents[0]);
+      } else if (loadedEvents.length === 0) {
+        setSelectedId(null);
+        setDraft(EMPTY_EVENT);
+        setQuestions([]);
+        setRegistrations([]);
+      }
     } catch (e) { toast(e instanceof Error ? e.message : "Couldn't load events.", { tone: "error" }); }
     finally { setLoadingEvents(false); }
   };
@@ -301,20 +320,21 @@ export default function EventAdminPanel() {
     </div>
 
     <AnimatePresence>
-      {open && <div className="fixed inset-0 z-[120] flex items-center justify-center p-2 sm:p-5">
+      {open && <div className="fixed inset-0 z-[120] flex items-center justify-center overflow-hidden p-0 sm:p-3 lg:p-5">
         <motion.button type="button" aria-label="Close" className="absolute inset-0 bg-stone-950/65 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpen(false)} />
-        <motion.div initial={{ opacity: 0, y: 20, scale: .99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: .99 }} className="relative flex max-h-[96vh] w-full max-w-7xl flex-col overflow-hidden rounded-[1.6rem] bg-[#fffdfc] shadow-2xl sm:rounded-[2rem]">
-          <header className="flex shrink-0 items-center justify-between gap-4 border-b border-brand-maroon/10 px-4 py-4 sm:px-7 sm:py-5">
-            <div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-maroon/55">Home feature</p><h2 className="mt-1 font-serif text-2xl font-light text-brand-maroon sm:text-3xl">Manage Home feature</h2></div>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setOpen(false)} className="rounded-full border border-brand-maroon/10 bg-white p-2.5 text-brand-maroon hover:bg-brand-maroon hover:text-white"><X size={17} /></button>
+        <motion.div initial={{ opacity: 0, y: 20, scale: .99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: .99 }} className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none bg-[#fffdfc] shadow-2xl sm:h-auto sm:max-h-[94dvh] sm:max-w-7xl sm:rounded-[1.6rem] lg:max-h-[92dvh]">
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-maroon/10 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4 lg:px-7 lg:py-5">
+            <div className="min-w-0">
+              <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/55 sm:text-[10px]">Home feature</p>
+              <h2 className="mt-1 truncate font-serif text-xl font-light text-brand-maroon sm:text-2xl lg:text-3xl">Manage Home feature</h2>
             </div>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close manager" className="shrink-0 rounded-full border border-brand-maroon/10 bg-white p-2.5 text-brand-maroon hover:bg-brand-maroon hover:text-white"><X size={17} /></button>
           </header>
 
-          <div className="grid min-h-0 flex-1 lg:grid-cols-[250px_minmax(0,1fr)]">
-            <aside className="border-b border-brand-maroon/10 bg-brand-cream/35 p-3 sm:p-4 lg:border-b-0 lg:border-r lg:p-5">
+          <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[250px_minmax(0,1fr)] lg:grid-rows-1 xl:grid-cols-[270px_minmax(0,1fr)]">
+            <aside className="min-h-0 overflow-hidden border-b border-brand-maroon/10 bg-brand-cream/35 p-3 sm:p-4 lg:border-b-0 lg:border-r lg:p-5">
               <button type="button" onClick={startNew} className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-maroon px-4 py-3 text-[10px] font-bold uppercase tracking-[0.16em] text-white"><Plus size={15} /> New event</button>
-              <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:max-h-[calc(96vh-145px)] lg:space-y-2 lg:overflow-y-auto">
+              <div className="flex max-h-[25vh] gap-2 overflow-x-auto pb-1 overscroll-x-contain lg:block lg:max-h-[calc(92dvh-115px)] lg:space-y-2 lg:overflow-x-hidden lg:overflow-y-auto">
                 {loadingEvents ? <p className="px-2 py-4 text-sm text-stone-500">Loading events…</p> : events.length === 0 ? <p className="px-2 py-4 text-sm leading-6 text-stone-500">No registration events yet. Create your first event.</p> : events.map((event) => <button key={event.id} type="button" onClick={() => selectEvent(event)} className={`min-w-[210px] rounded-2xl border p-3 text-left transition lg:min-w-0 ${selectedId === event.id ? "border-brand-maroon bg-white shadow-sm" : "border-transparent bg-white/45 hover:border-brand-maroon/10 hover:bg-white"}`}>
                   <div className="flex items-start justify-between gap-2"><span className="line-clamp-2 font-serif text-[15px] font-semibold text-brand-maroon">{event.title}</span><span className={`shrink-0 rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider ${event.status === "published" ? "bg-emerald-50 text-emerald-700" : event.status === "closed" ? "bg-stone-100 text-stone-500" : "bg-amber-50 text-amber-700"}`}>{event.status}</span></div>
                   <div className="mt-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-brand-maroon/50"><span className="flex items-center gap-1"><Users size={11} /> {event.registration_count ?? 0}</span><span className="flex items-center gap-1"><Pencil size={10} /> Edit</span></div>
@@ -322,7 +342,7 @@ export default function EventAdminPanel() {
               </div>
             </aside>
 
-            <main className="min-h-0 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <main className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-3 sm:p-5 lg:p-7 xl:p-8">
               {!selectedId && <div className="mb-5 rounded-[1.4rem] border border-brand-maroon/10 bg-brand-cream/50 p-5"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-maroon/55">Start here</p><h3 className="mt-1 font-serif text-xl text-brand-maroon">Create your event announcement</h3><p className="mt-2 text-sm leading-6 text-stone-600">Choose whether this Home feature is an event or a special-day poster, then add the content visitors should see.</p></div>}
 
               <div className="mb-6 flex flex-wrap gap-2 border-b border-brand-maroon/10 pb-3">
@@ -330,7 +350,7 @@ export default function EventAdminPanel() {
               </div>
 
               {tab === "event" && <div className="space-y-5">
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
+                <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_330px]">
                   <div className="space-y-5">
                     <div className="rounded-[1.4rem] border border-brand-maroon/10 bg-white p-4 shadow-sm sm:p-5">
                       <div className="mb-4 flex items-center justify-between gap-3">
@@ -401,12 +421,12 @@ export default function EventAdminPanel() {
                     </div>
                   </div>
 
-                  <div className="xl:sticky xl:top-0 xl:self-start">
+                  <div className="lg:sticky lg:top-0 lg:self-start">
                     <div className="overflow-hidden rounded-[1.5rem] border border-brand-maroon/10 bg-white shadow-sm">
                       <div className="border-b border-brand-maroon/10 bg-brand-cream/30 px-4 py-3">
                         <p className="form-builder-label">Primary poster</p>
                       </div>
-                      <div className="flex min-h-[330px] items-center justify-center bg-[#fffaf8] p-4 sm:min-h-[430px]">{posterPreview ? <img src={posterPreview} alt="Event poster preview" className="max-h-[430px] w-full rounded-2xl object-contain" /> : <div className="text-center text-brand-maroon/30"><ImagePlus className="mx-auto" size={40} /><p className="mt-2 text-xs">Choose a poster</p></div>}</div>
+                      <div className="flex min-h-[240px] items-center justify-center bg-[#fffaf8] p-3 sm:min-h-[330px] lg:min-h-[380px]">{posterPreview ? <img src={posterPreview} alt="Event poster preview" className="max-h-[430px] w-full rounded-2xl object-contain" /> : <div className="text-center text-brand-maroon/30"><ImagePlus className="mx-auto" size={40} /><p className="mt-2 text-xs">Choose a poster</p></div>}</div>
                       <div className="border-t border-brand-maroon/10 p-4">
                         <button type="button" onClick={() => fileRef.current?.click()} disabled={posterUploading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-maroon px-4 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-white disabled:opacity-50"><ImagePlus size={15} /> {posterUploading ? "Uploading…" : selectedId ? "Replace poster" : "Choose poster"}</button>
                         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPoster(f); e.currentTarget.value = ""; }} />
