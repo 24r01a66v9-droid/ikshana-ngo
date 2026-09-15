@@ -853,6 +853,15 @@ export default function Gallery() {
   const addMoreInputRef = useRef<HTMLInputElement>(null);
   const touchStartXRef = useRef<number | null>(null);
 
+  // Touch/pen reordering is separate from native HTML5 drag-and-drop.
+  // Mobile browsers (including "Desktop site" mode) still report touch
+  // pointer events, so native draggable alone cannot start a drag there.
+  const touchDragGroupIdRef = useRef<string | null>(null);
+  const touchDragStartRef = useRef({ x: 0, y: 0 });
+  const touchDragActiveRef = useRef(false);
+  const touchDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressNextMemoryClickRef = useRef(false);
+
   const isObjectUrl = (value?: string | null): boolean => Boolean(value?.startsWith("blob:"));
   const revokeObjectUrl = (value?: string | null) => {
     if (isObjectUrl(value)) URL.revokeObjectURL(value as string);
@@ -1252,24 +1261,12 @@ export default function Gallery() {
     setDragOverGroupId(groupId);
   };
 
-  const handleCardDrop = async (e: React.DragEvent, targetGroupId: string) => {
-    if (!isAdmin) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverGroupId(null);
-
-    const draggedId = draggedGroupId || e.dataTransfer?.getData("text/plain") || null;
-    if (!draggedId || draggedId === targetGroupId) {
-      setDraggedGroupId(null);
-      return;
-    }
+  const reorderMemoryToTarget = async (draggedId: string, targetGroupId: string) => {
+    if (!draggedId || draggedId === targetGroupId) return;
 
     const draggedIndex = memories.findIndex((m) => m.groupId === draggedId);
     const targetIndex = memories.findIndex((m) => m.groupId === targetGroupId);
-    if (draggedIndex === -1 || targetIndex === -1) {
-      setDraggedGroupId(null);
-      return;
-    }
+    if (draggedIndex === -1 || targetIndex === -1) return;
 
     const next = [...memories];
     const [moved] = next.splice(draggedIndex, 1);
@@ -1277,8 +1274,111 @@ export default function Gallery() {
     const reordered = next.map((m, i) => ({ ...m, displayOrder: i + 1 }));
 
     setDraggedGroupId(null);
+    setDragOverGroupId(null);
     await persistReorder(reordered);
   };
+
+  const handleCardDrop = async (e: React.DragEvent, targetGroupId: string) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const draggedId = draggedGroupId || e.dataTransfer?.getData("text/plain") || null;
+    if (!draggedId || draggedId === targetGroupId) {
+      setDraggedGroupId(null);
+      setDragOverGroupId(null);
+      return;
+    }
+
+    await reorderMemoryToTarget(draggedId, targetGroupId);
+  };
+
+  const clearTouchDrag = () => {
+    if (touchDragTimerRef.current) {
+      clearTimeout(touchDragTimerRef.current);
+      touchDragTimerRef.current = null;
+    }
+    touchDragGroupIdRef.current = null;
+    touchDragActiveRef.current = false;
+  };
+
+  const getTouchDropTarget = (clientX: number, clientY: number) => {
+    const elements = document.elementsFromPoint(clientX, clientY);
+    for (const element of elements) {
+      const card = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-memory-card]") : null;
+      const groupId = card?.dataset.memoryCard;
+      if (groupId) return groupId;
+    }
+    return null;
+  };
+
+  const handleTouchDragStart = (e: ReactPointerEvent<HTMLDivElement>, groupId: string) => {
+    if (!isAdmin || (e.pointerType !== "touch" && e.pointerType !== "pen")) return;
+
+    clearTouchDrag();
+    touchDragGroupIdRef.current = groupId;
+    touchDragStartRef.current = { x: e.clientX, y: e.clientY };
+
+    // A short hold distinguishes a drag from normal page scrolling.
+    touchDragTimerRef.current = setTimeout(() => {
+      if (touchDragGroupIdRef.current !== groupId) return;
+      touchDragActiveRef.current = true;
+      setDraggedGroupId(groupId);
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate?.(18);
+      }
+    }, 220);
+  };
+
+  const handleTouchDragMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isAdmin || !touchDragGroupIdRef.current) return;
+
+    const start = touchDragStartRef.current;
+    const distance = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+
+    // If the finger moves before the hold completes, treat it as scrolling.
+    if (!touchDragActiveRef.current) {
+      if (distance > 10) clearTouchDrag();
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const targetGroupId = getTouchDropTarget(e.clientX, e.clientY);
+    if (targetGroupId) setDragOverGroupId(targetGroupId);
+  };
+
+  const handleTouchDragEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const draggedId = touchDragGroupIdRef.current;
+    const wasDragging = touchDragActiveRef.current;
+
+    if (draggedId && wasDragging) {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetGroupId = getTouchDropTarget(e.clientX, e.clientY);
+
+      // Suppress the synthetic click generated after a touch drag so the
+      // card does not accidentally open the lightbox.
+      suppressNextMemoryClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextMemoryClickRef.current = false;
+      }, 350);
+
+      if (targetGroupId && targetGroupId !== draggedId) {
+        void reorderMemoryToTarget(draggedId, targetGroupId);
+      } else {
+        setDraggedGroupId(null);
+        setDragOverGroupId(null);
+      }
+    }
+
+    clearTouchDrag();
+  };
+
+  useEffect(() => {
+    return () => clearTouchDrag();
+  }, []);
 
   const handleCardDragEnd = () => {
     setDraggedGroupId(null);
@@ -1550,6 +1650,7 @@ export default function Gallery() {
                     <motion.div
                       key={memory.groupId}
                       id={`memory-${memory.groupId}`}
+                      data-memory-card={memory.groupId}
                       layout
                       initial={{ opacity: 0, y: 16 }}
                       animate={{ opacity: 1, y: 0, rotate: getCardTilt(index) }}
@@ -1562,6 +1663,10 @@ export default function Gallery() {
                       onDrop={(e) => handleCardDrop(e as any, memory.groupId)}
                       onDragLeave={() => setDragOverGroupId(null)}
                       onDragEnd={handleCardDragEnd}
+                      onPointerDown={(e) => handleTouchDragStart(e, memory.groupId)}
+                      onPointerMove={handleTouchDragMove}
+                      onPointerUp={handleTouchDragEnd}
+                      onPointerCancel={handleTouchDragEnd}
                       className={`group relative flex flex-col overflow-hidden rounded-[1.5rem] border bg-white p-3 pt-0 select-none shadow-[0_14px_34px_-16px_rgba(91,63,212,0.28)] transition-shadow duration-300 sm:rounded-[1.75rem] sm:p-4 sm:pt-0 ${typeMeta.glowClass} ${
                         isDragged
                           ? "opacity-50 border-brand-maroon"
@@ -1575,7 +1680,13 @@ export default function Gallery() {
                       <div className="relative">
                         <button
                           type="button"
-                          onClick={() => openLightboxForMemory(memory)}
+                          onClick={() => {
+                            if (suppressNextMemoryClickRef.current) {
+                              suppressNextMemoryClickRef.current = false;
+                              return;
+                            }
+                            openLightboxForMemory(memory);
+                          }}
                           className="relative block aspect-[3/2] w-full overflow-hidden rounded-[1.1rem] bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-maroon focus-visible:ring-offset-2 sm:rounded-[1.35rem]"
                           aria-label={`View ${memory.title} full size`}
                         >
@@ -1597,7 +1708,7 @@ export default function Gallery() {
                           )}
 
                           {isAdmin && (
-                            <div className="pointer-events-none absolute bottom-2.5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-dashed border-white/40 bg-stone-950/60 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-white backdrop-blur">
+                            <div className="pointer-events-none absolute bottom-2.5 left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-dashed border-white/40 bg-stone-950/60 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-white backdrop-blur sm:flex">
                               <GripVertical size={11} />
                               Drag to reorder
                             </div>
