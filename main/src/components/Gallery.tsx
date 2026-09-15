@@ -1597,7 +1597,7 @@ export default function Gallery() {
                           )}
 
                           {isAdmin && (
-                            <div className="pointer-events-none absolute bottom-2.5 left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-dashed border-white/40 bg-stone-950/60 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 sm:flex">
+                            <div className="pointer-events-none absolute bottom-2.5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-dashed border-white/40 bg-stone-950/60 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-white backdrop-blur">
                               <GripVertical size={11} />
                               Drag to reorder
                             </div>
@@ -1860,7 +1860,7 @@ export default function Gallery() {
                                   </span>
                                 )}
 
-                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-stone-950/55 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/thumb:opacity-100">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-stone-950/45">
                                   <div className="flex items-center gap-1">
                                     <button
                                       type="button"
