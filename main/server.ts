@@ -17,6 +17,7 @@ import {
   shouldUseDevelopmentFallback,
 } from "./src/auth/fallback";
 import { hashPassword, verifyPassword } from "./src/auth/password";
+import { registerEventRoutes } from "./server/registrations";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -224,6 +225,93 @@ const sendPasswordResetEmail = async (toEmail: string, resetUrl: string) => {
       resetUrl,
       reason:
         "Email could not be sent, but you can use the reset link directly",
+    };
+  }
+};
+
+
+/**
+ * Sends the event-registration confirmation email when SMTP is configured.
+ * Email failure must never make an otherwise successful registration fail.
+ */
+const sendRegistrationEmail = async ({
+  to,
+  name,
+  eventTitle,
+  code,
+  paymentStatus,
+  amount,
+}: {
+  to: string;
+  name: string;
+  eventTitle: string;
+  code: string;
+  paymentStatus: string;
+  amount: number;
+}): Promise<{ sent: boolean; reason?: string }> => {
+  const transporter = createMailTransporter();
+
+  if (!transporter) {
+    return {
+      sent: false,
+      reason: "SMTP credentials are not configured.",
+    };
+  }
+
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const paymentText =
+    amount > 0
+      ? paymentStatus === "verified"
+        ? "Payment verified"
+        : paymentStatus === "submitted"
+          ? "Payment reference submitted — pending verification"
+          : "Payment pending"
+      : "No payment required";
+
+  try {
+    const emailPromise = transporter.sendMail({
+      from:
+        process.env.SMTP_FROM ||
+        process.env.SMTP_USER ||
+        "no-reply@ikshana.local",
+      to,
+      subject: `Registration confirmed — ${eventTitle}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#292524;line-height:1.6">
+          <h2 style="color:#7b1e1e;margin-bottom:8px">Registration confirmed</h2>
+          <p>Hello ${escapeHtml(name)},</p>
+          <p>Your registration for <strong>${escapeHtml(eventTitle)}</strong> has been received successfully.</p>
+          <div style="margin:24px 0;padding:18px 20px;border:1px solid #ead8d5;border-radius:12px;background:#fff8f7">
+            <p style="margin:0 0 8px"><strong>Registration ID</strong></p>
+            <p style="font-size:22px;margin:0 0 14px;color:#7b1e1e"><strong>${escapeHtml(code)}</strong></p>
+            <p style="margin:0"><strong>Payment:</strong> ${escapeHtml(paymentText)}</p>
+            ${amount > 0 ? `<p style="margin:4px 0 0"><strong>Amount:</strong> ₹${Number(amount).toLocaleString("en-IN")}</p>` : ""}
+          </div>
+          <p>Please keep your registration ID for future reference.</p>
+          <p style="margin-top:28px">With regards,<br/><strong>Ikshana Foundation</strong></p>
+        </div>
+      `,
+    });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email sending timeout")), 5000),
+    );
+
+    await Promise.race([emailPromise, timeoutPromise]);
+    console.log(`[email] Event registration confirmation sent to ${to}`);
+    return { sent: true };
+  } catch (error: any) {
+    console.error("Failed to send event registration email:", error?.message || error);
+    return {
+      sent: false,
+      reason: error?.message || "Email sending failed",
     };
   }
 };
@@ -2539,6 +2627,23 @@ async function startServer() {
       console.error("Supabase save settings error:", error);
       return res.status(500).json({ error: "Failed to save site settings" });
     }
+  });
+
+  /* ---------------------------------------------------------------------
+   * Event registration (public + admin). The route implementation lives in
+   * server/registrations.ts so the main server remains maintainable.
+   * ------------------------------------------------------------------- */
+  registerEventRoutes({
+    app,
+    supabase,
+    authenticateToken,
+    authenticateOptionalToken,
+    isAdminUser,
+    isMissingTableError,
+    rateLimit,
+    uploadToSupabaseStorage,
+    upload,
+    sendRegistrationEmail,
   });
 
   // Medical Requests API

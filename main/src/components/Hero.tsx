@@ -1,6 +1,8 @@
 import { motion } from "motion/react";
 import { ArrowRight, Heart, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import EventSpotlight from "./EventSpotlight";
+import EventAdminPanel from "./EventAdminPanel";
 
 export default function Hero() {
   const mottoSteps = [
@@ -31,19 +33,18 @@ export default function Hero() {
               justify-center
               px-0
               pt-28
-              pb-16
+              pb-8
               sm:pt-28
-              sm:pb-20
+              sm:pb-10
               md:pt-32
-              md:pb-24
+              md:pb-12
               lg:pt-32
-              lg:pb-28
-              xl:min-h-[100svh]
+              lg:pb-14
               xl:items-start
-              xl:pt-36
-              xl:pb-32
-              2xl:pt-36
-              2xl:pb-32
+              xl:pt-32
+              xl:pb-8
+              2xl:pt-32
+              2xl:pb-8
             "
           >
             <div className="relative z-10 w-full max-w-6xl text-center">
@@ -352,6 +353,12 @@ export default function Hero() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Upcoming event announcement + admin event management */}
+      <div className="bg-[#fffcfc]">
+        <EventSpotlight />
+        <EventAdminPanel />
       </div>
     </section>
   );
