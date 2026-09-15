@@ -1605,7 +1605,7 @@ export default function Gallery() {
                         </button>
 
                         {isAdmin && (
-                          <div className="absolute right-2 top-2 flex items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                          <div className="absolute right-2 top-2 flex items-center gap-1.5 opacity-100 transition-opacity">
                             {/* Move up/down — the only way to reorder on a touchscreen,
                                 since native HTML5 drag-and-drop (used on sm+ below)
                                 never fires on touch devices at all. Reorders within
@@ -1860,7 +1860,7 @@ export default function Gallery() {
                                   </span>
                                 )}
 
-                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-stone-950/55 opacity-0 transition-opacity group-hover/thumb:opacity-100">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-stone-950/55 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/thumb:opacity-100">
                                   <div className="flex items-center gap-1">
                                     <button
                                       type="button"
@@ -1921,7 +1921,7 @@ export default function Gallery() {
                           />
                         </div>
                         <p className="mt-3 text-[10px] text-brand-maroon/40">
-                          The first photo is used as the cover. Hover a photo to reorder, re-crop, or remove it.
+                          The first photo is used as the cover. On mobile, the photo controls stay visible; on desktop, hover a photo to reorder, re-crop, or remove it.
                         </p>
                       </div>
                     )}

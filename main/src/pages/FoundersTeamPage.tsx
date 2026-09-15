@@ -301,7 +301,7 @@ function ImageCropperModal({ image, onCancel, onConfirm }: ImageCropperModalProp
               Adjust image
             </h3>
             <p className="mt-1 max-w-xl text-xs leading-5 text-stone-500 sm:text-sm">
-              Drag the image and use the zoom slider until the face and head fit comfortably inside the circle.
+              Drag the image and use the zoom slider until the face and head fit comfortably inside the frame.
             </p>
           </div>
 
@@ -358,7 +358,7 @@ function ImageCropperModal({ image, onCancel, onConfirm }: ImageCropperModalProp
             />
 
             <div className="pointer-events-none absolute inset-0">
-              <div className="absolute left-1/2 top-1/2 aspect-square w-[78%] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]" />
+              <div className="absolute left-1/2 top-1/2 aspect-square w-[78%] -translate-x-1/2 -translate-y-1/2 rounded-[1.35rem] border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]" />
               <div className="absolute left-1/2 top-1/2 h-px w-[78%] -translate-x-1/2 -translate-y-1/2 bg-white/20" />
               <div className="absolute left-1/2 top-1/2 h-[78%] w-px -translate-x-1/2 -translate-y-1/2 bg-white/20" />
             </div>
@@ -371,7 +371,7 @@ function ImageCropperModal({ image, onCancel, onConfirm }: ImageCropperModalProp
           </div>
 
           <p className="mx-auto mt-3 max-w-[430px] text-center text-xs text-stone-500">
-            Everything inside the circle will be saved as the profile picture.
+            Everything inside the frame will be saved as the profile picture.
           </p>
 
           <div className="mx-auto mt-5 flex w-full max-w-[430px] items-center gap-3">
@@ -433,6 +433,9 @@ export default function FoundersTeamPage() {
   const [selectedPreviousBatch, setSelectedPreviousBatch] = useState("");
   const [draggedMemberId, setDraggedMemberId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const mobilePointerDragRef = useRef<{ memberId: string; pointerId: number } | null>(null);
+  const mobileDropTargetRef = useRef<string | null>(null);
+  const mobileDragHandleRef = useRef<HTMLElement | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [cropSourceImage, setCropSourceImage] = useState<string | null>(null);
@@ -775,6 +778,64 @@ export default function FoundersTeamPage() {
     }
   };
 
+  const handleMobilePointerDown = (event: ReactPointerEvent<HTMLElement>, memberId: string) => {
+    if (!isAdmin || event.pointerType === "mouse") return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    mobilePointerDragRef.current = { memberId, pointerId: event.pointerId };
+    mobileDropTargetRef.current = memberId;
+    mobileDragHandleRef.current = event.currentTarget;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDraggedMemberId(memberId);
+    setDropTargetId(memberId);
+  };
+
+  const handleMobilePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const activeDrag = mobilePointerDragRef.current;
+    if (!activeDrag || activeDrag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const card = element?.closest<HTMLElement>("[data-member-id]");
+    const targetId = card?.dataset.memberId ?? null;
+
+    if (targetId) {
+      const draggedMember = leadershipMembers.find((member) => member.id === activeDrag.memberId);
+      const targetMember = leadershipMembers.find((member) => member.id === targetId);
+      if (draggedMember && targetMember && draggedMember.category === targetMember.category) {
+        mobileDropTargetRef.current = targetId;
+        setDropTargetId(targetId);
+      }
+    }
+  };
+
+  const finishMobilePointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const activeDrag = mobilePointerDragRef.current;
+    if (!activeDrag || activeDrag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const targetId = mobileDropTargetRef.current;
+    mobilePointerDragRef.current = null;
+    mobileDropTargetRef.current = null;
+    mobileDragHandleRef.current = null;
+
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {}
+
+    if (targetId && targetId !== activeDrag.memberId) {
+      void handleReorderMembers(activeDrag.memberId, targetId);
+    } else {
+      setDraggedMemberId(null);
+      setDropTargetId(null);
+    }
+  };
+
   const handleReorderMembers = async (draggedId: string, targetId: string) => {
     const draggedMember = leadershipMembers.find((member) => member.id === draggedId);
     const targetMember = leadershipMembers.find((member) => member.id === targetId);
@@ -890,6 +951,7 @@ export default function FoundersTeamPage() {
         return (
           <motion.article
             key={person.id}
+            data-member-id={person.id}
             initial={{ y: 14, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             whileHover={{
@@ -962,7 +1024,15 @@ export default function FoundersTeamPage() {
 
               {isAdmin && (
                 <>
-                  <div className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full border border-dashed border-[#5B3FD4]/30 bg-white/90 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#5B3FD4] backdrop-blur">
+                  <div
+                    onPointerDown={(event) => handleMobilePointerDown(event, person.id)}
+                    onPointerMove={handleMobilePointerMove}
+                    onPointerUp={finishMobilePointerDrag}
+                    onPointerCancel={finishMobilePointerDrag}
+                    className="absolute left-2.5 top-2.5 inline-flex touch-none select-none items-center gap-1 rounded-full border border-dashed border-[#5B3FD4]/30 bg-white/90 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#5B3FD4] backdrop-blur cursor-grab active:cursor-grabbing"
+                    role="button"
+                    aria-label={`Drag ${person.name} to reorder`}
+                  >
                     <GripVertical size={11} />
                     Drag
                   </div>
@@ -1287,7 +1357,7 @@ export default function FoundersTeamPage() {
                       <img
                         src={previewImage}
                         alt="Profile preview"
-                        className="h-28 w-28 rounded-full border-4 border-brand-maroon/10 object-cover shadow-lg"
+                        className="h-28 w-28 rounded-[1.35rem] border-4 border-brand-maroon/10 object-cover shadow-lg"
                       />
                     </div>
 
