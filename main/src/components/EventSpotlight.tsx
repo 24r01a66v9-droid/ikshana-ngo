@@ -100,8 +100,6 @@ export default function EventSpotlight() {
       >
         <div className={`relative overflow-hidden border-b border-brand-maroon/10 px-5 py-4 sm:px-8 sm:py-5 ${specialDay ? "bg-[radial-gradient(circle_at_12%_50%,rgba(122,31,45,.10),transparent_30%),radial-gradient(circle_at_88%_20%,rgba(196,145,82,.10),transparent_24%),linear-gradient(135deg,#fff9f5,#fff) ]" : "bg-[radial-gradient(circle_at_0%_50%,rgba(122,31,45,.10),transparent_30%),linear-gradient(135deg,#fff9f5,#fff) ]"}`}>
           <div className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-brand-maroon" />
-          <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full border border-brand-maroon/10" />
-          <div className="pointer-events-none absolute -right-2 -top-10 h-20 w-20 rounded-full border border-brand-maroon/10" />
           <div className="relative flex items-center gap-4 sm:gap-5">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-maroon text-white shadow-[0_12px_30px_-14px_rgba(122,31,45,.95)] sm:h-13 sm:w-13">
               {specialDay ? <Sparkles size={19} /> : <Megaphone size={19} />}

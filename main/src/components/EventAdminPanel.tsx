@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarDays, Check, ChevronDown, ChevronUp, Download, FileText,
-  ImagePlus, Pencil, Plus, Save, Settings2, Trash2, Users, X, ArrowLeft, ArrowRight,
+  ImagePlus, Pencil, Plus, Save, Settings2, Trash2, Users, X,
 } from "lucide-react";
 import { buildAuthRequestInit } from "../auth/fetchWithAuth";
 import { useAuth } from "../context/AuthContext";
@@ -121,8 +121,6 @@ export default function EventAdminPanel() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [posterUploading, setPosterUploading] = useState(false);
   const [pendingPoster, setPendingPoster] = useState<File | null>(null);
-  const [homeSlides, setHomeSlides] = useState<Array<{ poster_url: string; message?: string }>>([]);
-  const slideFileRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selected = useMemo(() => events.find((e) => e.id === selectedId) ?? null, [events, selectedId]);
@@ -151,8 +149,6 @@ export default function EventAdminPanel() {
       registration_enabled: Boolean(event.registration_enabled), payment_mode: event.payment_mode || (Number(event.fee_amount || 0) > 0 ? "upi" : "none"), home_feature_type: event.home_feature_type || "event",
     });
     const nextFormConfig: Record<string, any> = { confirmation_message: "Thank you. Your registration has been received.", show_time: true, ...(event.form_config || {}) };
-    const configuredSlides = Array.isArray(nextFormConfig.home_slides) ? nextFormConfig.home_slides.filter((slide: any) => slide && typeof slide.poster_url === "string" && slide.poster_url.trim()).map((slide: any) => ({ poster_url: slide.poster_url, message: String(slide.message || "") })) : [];
-    setHomeSlides(configuredSlides.length ? configuredSlides : (event.poster_url ? [{ poster_url: event.poster_url, message: "" }] : []));
     setFormConfig(nextFormConfig);
     /* keep the draft shape above stable */
     setDraft((current) => ({ ...current, registration_enabled: Boolean(event.registration_enabled), payment_mode: event.payment_mode || (Number(event.fee_amount || 0) > 0 ? "upi" : "none"), home_feature_type: event.home_feature_type || "event" }));
@@ -160,7 +156,7 @@ export default function EventAdminPanel() {
   };
 
   const startNew = () => {
-    setSelectedId(null); setDraft(EMPTY_EVENT); setQuestions([]); setFormConfig({ confirmation_message: "Thank you. Your registration has been received.", show_time: true }); setHomeSlides([]); setRegistrations([]); setPendingPoster(null); setTab("event");
+    setSelectedId(null); setDraft(EMPTY_EVENT); setQuestions([]); setFormConfig({ confirmation_message: "Thank you. Your registration has been received.", show_time: true }); setRegistrations([]); setPendingPoster(null); setTab("event");
   };
 
   const loadEventDetails = async (id: number, slug?: string) => {
@@ -178,45 +174,6 @@ export default function EventAdminPanel() {
     finally { setLoadingDetails(false); }
   };
 
-  const saveHomeSlides = async (slides: Array<{ poster_url: string; message?: string }>) => {
-    if (!selectedId) return;
-    const nextConfig = { ...formConfig, home_slides: slides };
-    setFormConfig(nextConfig);
-    try {
-      const res = await fetch(`/api/reg/admin/events/${selectedId}`, buildAuthRequestInit({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ form_config: nextConfig }) }));
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || "Couldn't save Home posters.");
-      toast("Home posters updated.", { tone: "success" });
-    } catch (e) { toast(e instanceof Error ? e.message : "Couldn't save Home posters.", { tone: "error" }); }
-  };
-
-  const uploadHomeSlides = async (files: File[]) => {
-    if (!selectedId) { toast("Create the poster feature first, then add more posters.", { tone: "error" }); return; }
-    const selectedFiles = files.filter((file) => file && file.type.startsWith("image/"));
-    if (!selectedFiles.length) return;
-    setPosterUploading(true);
-    try {
-      let latestSlides = [...homeSlides];
-      for (const file of selectedFiles) {
-        const form = new FormData(); form.append("file", file);
-        const res = await fetch(`/api/reg/admin/events/${selectedId}/home-slide`, buildAuthRequestInit({ method: "POST", body: form }));
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body?.error || `Poster upload failed for ${file.name}.`);
-        latestSlides = Array.isArray(body.home_slides)
-          ? body.home_slides.filter((slide: any) => slide && typeof slide.poster_url === "string" && slide.poster_url.trim()).map((slide: any) => ({ poster_url: slide.poster_url, message: String(slide.message || "") }))
-          : [...latestSlides, { poster_url: body.poster_url, message: "" }];
-      }
-      setHomeSlides(latestSlides);
-      setFormConfig((current) => ({ ...current, home_slides: latestSlides }));
-      toast(`${selectedFiles.length} poster${selectedFiles.length === 1 ? "" : "s"} added to the Home carousel.`, { tone: "success" });
-    } catch (e) { toast(e instanceof Error ? e.message : "Poster upload failed.", { tone: "error" }); }
-    finally { setPosterUploading(false); }
-  };
-
-  const updateHomeSlide = (index: number, patch: Partial<{ poster_url: string; message: string }>) => setHomeSlides((current) => current.map((slide, i) => i === index ? { ...slide, ...patch } : slide));
-  const moveHomeSlide = (index: number, direction: -1 | 1) => setHomeSlides((current) => { const next = index + direction; if (next < 0 || next >= current.length) return current; const copy = [...current]; [copy[index], copy[next]] = [copy[next], copy[index]]; return copy; });
-  const removeHomeSlide = async (index: number) => { const next = homeSlides.filter((_, i) => i !== index); setHomeSlides(next); await saveHomeSlides(next); };
-
   const uploadPoster = async (file: File, eventId = selectedId) => {
     if (!eventId) { setPendingPoster(file); return; }
     setPosterUploading(true);
@@ -226,13 +183,6 @@ export default function EventAdminPanel() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || "Poster upload failed.");
       setEvents((current) => current.map((e) => e.id === eventId ? { ...e, poster_url: body.poster_url } : e));
-      if (draft.home_feature_type === "special_day") {
-        const nextSlides = homeSlides.length ? homeSlides.map((slide, index) => index === 0 ? { ...slide, poster_url: body.poster_url } : slide) : [{ poster_url: body.poster_url, message: "" }];
-        setHomeSlides(nextSlides);
-        const nextConfig = { ...formConfig, home_slides: nextSlides };
-        setFormConfig(nextConfig);
-        await fetch(`/api/reg/admin/events/${eventId}`, buildAuthRequestInit({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ form_config: nextConfig }) }));
-      }
       toast("Poster updated.", { tone: "success" });
     } catch (e) { toast(e instanceof Error ? e.message : "Poster upload failed.", { tone: "error" }); }
     finally { setPosterUploading(false); }
@@ -399,7 +349,6 @@ export default function EventAdminPanel() {
                         {draft.home_feature_type !== "special_day" && <Field label="Short announcement"><input value={draft.summary} onChange={(e) => setDraft({ ...draft, summary: e.target.value })} className="admin-input" placeholder="A short line visitors can read before the details." /></Field>}
                         {draft.home_feature_type !== "special_day" && <Field label="Description"><textarea rows={4} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} className="admin-input resize-y" placeholder="Optional. Add only information that is not already clear from the poster." /></Field>}
                         {draft.home_feature_type === "special_day" && <Field label="Home message (optional)"><input value={draft.home_message} onChange={(e) => setDraft({ ...draft, home_message: e.target.value })} className="admin-input" placeholder="Wishing you a Happy Engineers' Day from the Ikshana family." /></Field>}
-                        {draft.home_feature_type === "special_day" && selectedId && <div className="rounded-[1.4rem] border border-brand-maroon/10 bg-brand-cream/25 p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="form-builder-label">Home poster collection</p><p className="mt-1 text-xs leading-5 text-stone-500">Add one or more celebration posters. They rotate automatically on Home; visitors can also use the arrows and dots.</p></div><button type="button" onClick={() => slideFileRef.current?.click()} disabled={posterUploading} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-brand-maroon px-4 text-[9px] font-bold uppercase tracking-[0.14em] text-white disabled:opacity-50"><ImagePlus size={14} /> Add posters</button><input ref={slideFileRef} type="file" accept="image/*" multiple className="hidden" onChange={async (e) => { const files = Array.from(e.target.files || []); if (files.length) await uploadHomeSlides(files); e.currentTarget.value = ""; }} /></div>{homeSlides.length === 0 ? <p className="mt-4 text-xs text-stone-500">Your main poster will be used automatically until you add more posters.</p> : <div className="mt-4 space-y-3">{homeSlides.map((slide, index) => <div key={`${slide.poster_url}-${index}`} className="rounded-2xl border border-brand-maroon/10 bg-white p-3"><div className="flex gap-3"><img src={slide.poster_url} alt="" className="h-24 w-16 shrink-0 rounded-xl object-cover" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[9px] font-bold uppercase tracking-[0.15em] text-brand-maroon/60">Poster {index + 1}</span><div className="flex items-center gap-1"><button type="button" aria-label="Move poster left" onClick={() => setHomeSlides((current) => { const next = index - 1; if (next < 0) return current; const copy=[...current]; [copy[index],copy[next]]=[copy[next],copy[index]]; return copy; })} className="rounded-lg p-1.5 text-brand-maroon hover:bg-brand-cream disabled:opacity-30" disabled={index===0}><ArrowLeft size={13}/></button><button type="button" aria-label="Move poster right" onClick={() => setHomeSlides((current) => { const next = index + 1; if (next >= current.length) return current; const copy=[...current]; [copy[index],copy[next]]=[copy[next],copy[index]]; return copy; })} className="rounded-lg p-1.5 text-brand-maroon hover:bg-brand-cream disabled:opacity-30" disabled={index===homeSlides.length-1}><ArrowRight size={13}/></button><button type="button" onClick={() => removeHomeSlide(index)} className="rounded-lg p-1.5 text-red-700 hover:bg-red-50"><Trash2 size={13}/></button></div></div><input value={slide.message || ""} onChange={(e) => updateHomeSlide(index, { message: e.target.value })} onBlur={() => saveHomeSlides(homeSlides)} className="admin-input mt-2" placeholder="Optional message for this poster" /></div></div></div>)}<button type="button" onClick={() => saveHomeSlides(homeSlides)} className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-full border border-brand-maroon/15 bg-white px-4 text-[9px] font-bold uppercase tracking-[0.14em] text-brand-maroon"><Save size={13}/> Save poster order & messages</button></div>}</div>}
                       </div>
                     </div>
 

@@ -741,7 +741,11 @@ export function registerEventRoutes({
       patch.payment_mode = paymentMode;
     }
     if (req.body?.capacity !== undefined) patch.capacity = req.body.capacity ? Number(req.body.capacity) : null;
-    if (req.body?.form_config !== undefined) patch.form_config = asSettings(req.body.form_config);
+    if (req.body?.form_config !== undefined) {
+      const nextFormConfig = { ...asSettings(req.body.form_config) };
+      delete nextFormConfig.home_slides;
+      patch.form_config = nextFormConfig;
+    }
     if (req.body?.home_feature_type !== undefined) {
       const featureType = String(req.body.home_feature_type);
       if (!["event", "special_day"].includes(featureType)) return res.status(400).json({ error: "Unknown Home feature type." });
@@ -850,30 +854,6 @@ export function registerEventRoutes({
       } catch (error) {
         return fail(res, error, "Failed to upload the poster");
       }
-    },
-  );
-
-  app.post(
-    "/api/reg/admin/events/:id/home-slide",
-    authenticateToken,
-    upload.single("file"),
-    async (req: any, res: Response) => {
-      if (!requireAdmin(req, res)) return;
-      if (!req.file) return res.status(400).json({ error: "No file received." });
-      const mime = String(req.file.mimetype || "").toLowerCase();
-      if (!mime.startsWith("image/")) return res.status(400).json({ error: "Home posters must be image files." });
-      if (Number(req.file.size || 0) > 12 * 1024 * 1024) return res.status(400).json({ error: "Home poster is too large (12 MB maximum)." });
-      try {
-        const { data: current, error: readError } = await supabase.from("reg_events").select("form_config, home_feature_type").eq("id", Number(req.params.id)).limit(1).single();
-        if (readError) throw readError;
-        if (current?.home_feature_type !== "special_day") return res.status(400).json({ error: "Multiple Home posters are available for special-day features only." });
-        const url = await uploadToSupabaseStorage(req.file, "photos");
-        const existing = Array.isArray(current?.form_config?.home_slides) ? current.form_config.home_slides : [];
-        const home_slides = [...existing, { poster_url: url, message: "" }];
-        const { data, error } = await supabase.from("reg_events").update({ form_config: { ...(current?.form_config || {}), home_slides } }).eq("id", Number(req.params.id)).select("id, form_config").single();
-        if (error) throw error;
-        return res.json({ success: true, poster_url: url, home_slides: data?.form_config?.home_slides || home_slides });
-      } catch (error) { return fail(res, error, "Failed to add the Home poster"); }
     },
   );
 
