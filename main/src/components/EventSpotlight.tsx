@@ -35,9 +35,9 @@ function formatWhen(startsAt: string | null, endsAt: string | null, showTime = t
 }
 
 const ANNOUNCEMENTS = [
-  "Come together. Participate. Support a greater cause.",
-  "Gather. Participate. Make an impact.",
-  "Every participation helps us extend support where it matters most.",
+  "Come together. Participate. Create memorable moments.",
+  "Gather. Connect with others. Be part of the experience.",
+  "Every participation helps us support meaningful initiatives.",
 ];
 
 const featuredEventRequest = fetch("/api/reg/featured")
