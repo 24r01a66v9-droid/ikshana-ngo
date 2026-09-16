@@ -102,7 +102,8 @@ function inputDateTime(value: string | null) {
 
 function datePart(value: string) { return value ? value.slice(0, 10) : ""; }
 function timePart(value: string) { return value && value.length >= 16 ? value.slice(11, 16) : ""; }
-function combineDateTime(date: string, time: string) { return date ? `${date}T${time || "00:00"}` : ""; }
+function combineDateTime(date: string, time: string) { return date ? (time ? `${date}T${time}` : date) : ""; }
+function clearDateTimePart(value: string) { return value ? "" : value; }
 
 export default function EventAdminPanel() {
   const { user } = useAuth();
@@ -125,7 +126,7 @@ export default function EventAdminPanel() {
 
   const selected = useMemo(() => events.find((e) => e.id === selectedId) ?? null, [events, selectedId]);
 
-  useEffect(() => { if (open && isAdmin) loadEvents(); }, [open, isAdmin]);
+  useEffect(() => { if (isAdmin) loadEvents(); }, [isAdmin]);
 
   const loadEvents = async () => {
     setLoadingEvents(true);
@@ -144,9 +145,9 @@ export default function EventAdminPanel() {
       );
 
       if (currentHomeEvent) {
-        await selectEvent(currentHomeEvent);
+        void selectEvent(currentHomeEvent);
       } else if (loadedEvents.length > 0 && !selectedId) {
-        await selectEvent(loadedEvents[0]);
+        void selectEvent(loadedEvents[0]);
       } else if (loadedEvents.length === 0) {
         setSelectedId(null);
         setDraft(EMPTY_EVENT);
@@ -322,7 +323,7 @@ export default function EventAdminPanel() {
     <AnimatePresence>
       {open && <div className="fixed inset-0 z-[120] flex items-center justify-center overflow-hidden p-0 sm:p-3 lg:p-5">
         <motion.button type="button" aria-label="Close" className="absolute inset-0 bg-stone-950/65 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpen(false)} />
-        <motion.div initial={{ opacity: 0, y: 20, scale: .99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: .99 }} className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none bg-[#fffdfc] shadow-2xl sm:h-auto sm:max-h-[94dvh] sm:max-w-7xl sm:rounded-[1.6rem] lg:max-h-[92dvh]">
+        <motion.div initial={{ opacity: 0, y: 20, scale: .99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: .99 }} className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none bg-[#fffdfc] shadow-2xl sm:h-auto sm:max-h-[94dvh] sm:max-w-7xl sm:rounded-[1.6rem] lg:max-h-[92dvh] xl:max-h-[90dvh]">
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-maroon/10 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4 lg:px-7 lg:py-5">
             <div className="min-w-0">
               <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/55 sm:text-[10px]">Home feature</p>
@@ -335,14 +336,14 @@ export default function EventAdminPanel() {
             <aside className="min-h-0 overflow-hidden border-b border-brand-maroon/10 bg-brand-cream/35 p-3 sm:p-4 lg:border-b-0 lg:border-r lg:p-5">
               <button type="button" onClick={startNew} className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-maroon px-4 py-3 text-[10px] font-bold uppercase tracking-[0.16em] text-white"><Plus size={15} /> New event</button>
               <div className="flex max-h-[25vh] gap-2 overflow-x-auto pb-1 overscroll-x-contain lg:block lg:max-h-[calc(92dvh-115px)] lg:space-y-2 lg:overflow-x-hidden lg:overflow-y-auto">
-                {loadingEvents ? <p className="px-2 py-4 text-sm text-stone-500">Loading events…</p> : events.length === 0 ? <p className="px-2 py-4 text-sm leading-6 text-stone-500">No registration events yet. Create your first event.</p> : events.map((event) => <button key={event.id} type="button" onClick={() => selectEvent(event)} className={`min-w-[210px] rounded-2xl border p-3 text-left transition lg:min-w-0 ${selectedId === event.id ? "border-brand-maroon bg-white shadow-sm" : "border-transparent bg-white/45 hover:border-brand-maroon/10 hover:bg-white"}`}>
+                {loadingEvents ? <p className="px-2 py-4 text-sm text-stone-500">Loading events…</p> : events.length === 0 ? <p className="px-2 py-4 text-sm leading-6 text-stone-500">No registration events yet. Create your first event.</p> : events.map((event) => <button key={event.id} type="button" onClick={() => selectEvent(event)} className={`w-[min(82vw,280px)] shrink-0 rounded-2xl border p-3 text-left transition lg:w-auto lg:min-w-0 ${selectedId === event.id ? "border-brand-maroon bg-white shadow-sm" : "border-transparent bg-white/45 hover:border-brand-maroon/10 hover:bg-white"}`}>
                   <div className="flex items-start justify-between gap-2"><span className="line-clamp-2 font-serif text-[15px] font-semibold text-brand-maroon">{event.title}</span><span className={`shrink-0 rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider ${event.status === "published" ? "bg-emerald-50 text-emerald-700" : event.status === "closed" ? "bg-stone-100 text-stone-500" : "bg-amber-50 text-amber-700"}`}>{event.status}</span></div>
                   <div className="mt-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-brand-maroon/50"><span className="flex items-center gap-1"><Users size={11} /> {event.registration_count ?? 0}</span><span className="flex items-center gap-1"><Pencil size={10} /> Edit</span></div>
                 </button>)}
               </div>
             </aside>
 
-            <main className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-3 sm:p-5 lg:p-7 xl:p-8">
+            <main className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-3 pb-6 sm:p-5 sm:pb-7 lg:p-7 lg:pb-8 xl:p-8">
               {!selectedId && <div className="mb-5 rounded-[1.4rem] border border-brand-maroon/10 bg-brand-cream/50 p-5"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-maroon/55">Start here</p><h3 className="mt-1 font-serif text-xl text-brand-maroon">Create your event announcement</h3><p className="mt-2 text-sm leading-6 text-stone-600">Choose whether this Home feature is an event or a special-day poster, then add the content visitors should see.</p></div>}
 
               <div className="mb-6 flex flex-wrap gap-2 border-b border-brand-maroon/10 pb-3">
@@ -376,10 +377,10 @@ export default function EventAdminPanel() {
                       <p className="form-builder-label">When & where</p>
                       <div className="mt-4 space-y-4">
                         <div className="grid gap-4 sm:grid-cols-2">
-                          <Field label="Start date"><input type="date" value={datePart(draft.starts_at)} onChange={(e) => setDraft({ ...draft, starts_at: combineDateTime(e.target.value, timePart(draft.starts_at)) })} className="admin-input" /></Field>
-                          <Field label="Start time (optional)"><input type="time" value={timePart(draft.starts_at)} disabled={formConfig.show_time === false} onChange={(e) => setDraft({ ...draft, starts_at: combineDateTime(datePart(draft.starts_at), e.target.value) })} className="admin-input disabled:cursor-not-allowed disabled:opacity-45" /></Field>
-                          <Field label="End date (optional)"><input type="date" value={datePart(draft.ends_at)} onChange={(e) => setDraft({ ...draft, ends_at: combineDateTime(e.target.value, timePart(draft.ends_at)) })} className="admin-input" /></Field>
-                          <Field label="End time (optional)"><input type="time" value={timePart(draft.ends_at)} disabled={formConfig.show_time === false} onChange={(e) => setDraft({ ...draft, ends_at: combineDateTime(datePart(draft.ends_at), e.target.value) })} className="admin-input disabled:cursor-not-allowed disabled:opacity-45" /></Field>
+                          <Field label="Start date"><div className="flex items-center gap-2"><input type="date" value={datePart(draft.starts_at)} onChange={(e) => setDraft({ ...draft, starts_at: combineDateTime(e.target.value, timePart(draft.starts_at)) })} className="admin-input min-w-0 flex-1" />{datePart(draft.starts_at) && <button type="button" onClick={() => setDraft({ ...draft, starts_at: "" })} className="inline-flex h-11 shrink-0 items-center gap-1 rounded-xl border border-brand-maroon/12 bg-white px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-brand-maroon hover:bg-brand-cream/40" aria-label="Clear start date"><X size={13} /> Clear</button>}</div></Field>
+                          <Field label="Start time (optional)"><div className="flex items-center gap-2"><input type="time" value={timePart(draft.starts_at)} disabled={formConfig.show_time === false} onChange={(e) => setDraft({ ...draft, starts_at: combineDateTime(datePart(draft.starts_at), e.target.value) })} className="admin-input min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-45" />{timePart(draft.starts_at) && <button type="button" onClick={() => setDraft({ ...draft, starts_at: datePart(draft.starts_at) })} className="inline-flex h-11 shrink-0 items-center gap-1 rounded-xl border border-brand-maroon/12 bg-white px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-brand-maroon hover:bg-brand-cream/40" aria-label="Clear start time"><X size={13} /> Clear</button>}</div></Field>
+                          <Field label="End date (optional)"><div className="flex items-center gap-2"><input type="date" value={datePart(draft.ends_at)} onChange={(e) => setDraft({ ...draft, ends_at: combineDateTime(e.target.value, timePart(draft.ends_at)) })} className="admin-input min-w-0 flex-1" />{datePart(draft.ends_at) && <button type="button" onClick={() => setDraft({ ...draft, ends_at: "" })} className="inline-flex h-11 shrink-0 items-center gap-1 rounded-xl border border-brand-maroon/12 bg-white px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-brand-maroon hover:bg-brand-cream/40" aria-label="Clear end date"><X size={13} /> Clear</button>}</div></Field>
+                          <Field label="End time (optional)"><div className="flex items-center gap-2"><input type="time" value={timePart(draft.ends_at)} disabled={formConfig.show_time === false} onChange={(e) => setDraft({ ...draft, ends_at: combineDateTime(datePart(draft.ends_at), e.target.value) })} className="admin-input min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-45" />{timePart(draft.ends_at) && <button type="button" onClick={() => setDraft({ ...draft, ends_at: datePart(draft.ends_at) })} className="inline-flex h-11 shrink-0 items-center gap-1 rounded-xl border border-brand-maroon/12 bg-white px-3 text-[9px] font-bold uppercase tracking-[0.12em] text-brand-maroon hover:bg-brand-cream/40" aria-label="Clear end time"><X size={13} /> Clear</button>}</div></Field>
                         </div>
                         <div className="flex items-center justify-between gap-4 rounded-2xl border border-brand-maroon/10 bg-brand-cream/25 px-4 py-3">
                           <div><p className="text-sm font-semibold text-brand-maroon">Show time to visitors</p><p className="mt-0.5 text-xs leading-5 text-stone-500">Turn this off when the date is enough. The stored event date remains unchanged.</p></div>
@@ -452,7 +453,7 @@ export default function EventAdminPanel() {
       </div>}
     </AnimatePresence>
 
-    <style>{`.admin-input{width:100%;border-radius:1rem;border:1px solid rgba(122,31,45,.12);background:#fff;padding:.72rem .9rem;font-size:.9rem;line-height:1.35rem;color:#4a3937;outline:none}.admin-input:focus{border-color:rgba(122,31,45,.45);box-shadow:0 0 0 3px rgba(122,31,45,.07)}.form-builder-label{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(122,31,45,.55)}`}</style>
+    <style>{`.admin-input{width:100%;min-height:44px;border-radius:1rem;border:1px solid rgba(122,31,45,.12);background:#fff;padding:.72rem .9rem;font-size:.9rem;line-height:1.35rem;color:#4a3937;outline:none;box-sizing:border-box}.admin-input[type="date"],.admin-input[type="time"]{-webkit-appearance:none;appearance:none}.admin-input:focus{border-color:rgba(122,31,45,.45);box-shadow:0 0 0 3px rgba(122,31,45,.07)}.form-builder-label{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(122,31,45,.55)}`}</style>
   </>;
 }
 

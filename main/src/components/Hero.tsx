@@ -63,16 +63,12 @@ export default function Hero() {
                 </span>
               </motion.div>
 
-              <motion.div
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.15, duration: 0.8 }}
-              >
-                <div className="relative mx-auto w-fit max-w-full px-4 sm:px-8">
+              <div>
+                <div className="relative mx-auto w-fit max-w-[calc(100vw-2rem)] px-0 sm:px-8">
 
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute -left-7 top-2 h-10 w-10 sm:-left-2 sm:top-0 sm:h-12 sm:w-12"
+                    className="pointer-events-none absolute -left-5 top-0 h-8 w-8 sm:-left-2 sm:top-0 sm:h-12 sm:w-12"
                   >
                     <span className="absolute left-0 top-5 h-5 w-1 rotate-[-35deg] rounded-full bg-brand-maroon/20 sm:h-10 sm:w-1.5" />
                     <span className="absolute left-3 top-2 h-4 w-1 rotate-[-18deg] rounded-full bg-brand-maroon/20 sm:left-5 sm:top-0 sm:h-8 sm:w-1.5" />
@@ -83,11 +79,12 @@ export default function Hero() {
                     className="
                       font-serif
                       font-light
-                      leading-[0.88]
-                      tracking-[-0.045em]
+                      leading-[0.92]
+                      tracking-[-0.035em]
                       text-brand-maroon
-                      text-[3.35rem]
-                      max-[380px]:text-[2.95rem]
+                      antialiased
+                      text-[clamp(2.45rem,11vw,3.35rem)]
+                      max-[380px]:text-[2.35rem]
                       sm:text-[4.7rem]
                       md:text-[5.8rem]
                       lg:text-[6.25rem]
@@ -136,19 +133,19 @@ export default function Hero() {
 
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute -right-2 bottom-0 h-10 w-14 sm:-right-5 sm:h-16 sm:w-24"
+                    className="pointer-events-none absolute -right-5 bottom-0 h-8 w-10 sm:-right-5 sm:h-16 sm:w-24"
                   >
                     <div className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full bg-brand-maroon/20 sm:h-3 sm:w-3" />
                     <div className="absolute right-0 top-3 h-7 w-12 rounded-br-[2rem] border-b-2 border-r-2 border-dashed border-brand-maroon/15 sm:right-2 sm:top-4 sm:h-12 sm:w-20 sm:rounded-br-[3rem]" />
                   </div>
                 </div>
-              </motion.div>
+              </div>
 
               <motion.div
                 initial={{ y: 24, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.35, duration: 0.7 }}
-                className="mx-auto mt-10 w-full max-w-6xl sm:mt-12"
+                className="mx-auto mt-8 w-full max-w-6xl sm:mt-12"
               >
                 <div className="relative mx-auto w-full overflow-hidden rounded-[1.75rem] border border-brand-maroon/10 bg-white px-4 py-5 text-left shadow-[0_18px_55px_rgba(112,0,0,0.07)] sm:px-8 sm:py-8 lg:px-10 lg:py-9">
                   <div className="absolute left-0 top-0 h-full w-1.5 bg-brand-maroon" />

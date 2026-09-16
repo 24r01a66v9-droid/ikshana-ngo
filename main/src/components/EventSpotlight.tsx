@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-  ArrowRight, CalendarDays, ChevronLeft, ChevronRight, Clock3, ExternalLink, FileText, IndianRupee, Mail,
-  MapPin, Megaphone, Phone, Sparkles, Users,
+  ArrowRight, CalendarDays, Cake, ChevronLeft, ChevronRight, Clock3, ContactRound, ExternalLink, FileText,
+  Flag, Flower2, GraduationCap, IndianRupee, Mail, MapPin, Megaphone, PartyPopper, Phone, Users, Wrench,
 } from "lucide-react";
 
 type HomeSlide = { poster_url: string; message?: string | null };
@@ -24,12 +24,14 @@ function formatWhen(startsAt: string | null, endsAt: string | null, showTime = t
   const start = new Date(startsAt); if (Number.isNaN(start.getTime())) return null;
   const date = start.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
   if (!showTime) return date;
-  const time = start.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  const timeOptions: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", hour12: true };
+  const time = start.toLocaleTimeString("en-IN", timeOptions).replace(/\b(am|pm)\b/i, (match) => match.toUpperCase());
   const end = endsAt ? new Date(endsAt) : null;
   if (end && !Number.isNaN(end.getTime()) && end.toDateString() === start.toDateString()) {
-    return `${date} · ${time}–${end.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}`;
+    const endTime = end.toLocaleTimeString("en-IN", timeOptions).replace(/\b(am|pm)\b/i, (match) => match.toUpperCase());
+    return `${date}\n${time} – ${endTime}`;
   }
-  return `${date} · ${time}`;
+  return `${date}\n${time}`;
 }
 
 const ANNOUNCEMENTS = [
@@ -37,6 +39,14 @@ const ANNOUNCEMENTS = [
   "Gather. Participate. Make an impact.",
   "Every participation helps us extend support where it matters most.",
 ];
+
+const featuredEventRequest = fetch("/api/reg/featured")
+  .then(async (response) => {
+    if (!response.ok) throw new Error(String(response.status));
+    const body = await response.json();
+    return (body?.event ?? null) as FeaturedEvent | null;
+  })
+  .catch(() => null);
 
 export default function EventSpotlight() {
   const [event, setEvent] = useState<FeaturedEvent | null>(null);
@@ -47,25 +57,22 @@ export default function EventSpotlight() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch("/api/reg/featured");
-        if (!response.ok) throw new Error(String(response.status));
-        const body = await response.json();
-        if (!cancelled) setEvent(body?.event ?? null);
-      } catch { if (!cancelled) setEvent(null); }
-      finally { if (!cancelled) setLoading(false); }
-    })();
+    featuredEventRequest.then((nextEvent) => {
+      if (!cancelled) setEvent(nextEvent);
+      if (!cancelled) setLoading(false);
+    });
     return () => { cancelled = true; };
   }, []);
 
+  const homeMessage = event?.home_message?.trim() || "";
+  const specialDay = event?.home_feature_type === "special_day";
+
   useEffect(() => {
     if (reduceMotion) return;
-    const timer = window.setInterval(() => setAnnouncementIndex((i) => (i + 1) % ANNOUNCEMENTS.length), 2200);
+    const timer = window.setInterval(() => setAnnouncementIndex((i) => i + 1), 2800);
     return () => window.clearInterval(timer);
   }, [reduceMotion]);
 
-  const specialDay = event?.home_feature_type === "special_day";
   const configuredSlides = Array.isArray(event?.form_config?.home_slides)
     ? event.form_config.home_slides.filter((s: any) => s && typeof s.poster_url === "string" && s.poster_url.trim()).map((s: any) => ({ poster_url: s.poster_url, message: String(s.message || "") })) as HomeSlide[]
     : [];
@@ -90,7 +97,16 @@ export default function EventSpotlight() {
   const description = event.description?.trim();
   const summary = event.summary?.trim();
   const goToSlide = (index: number) => setSlideIndex((index + slides.length) % slides.length);
-  const specialMessage = activeSlide?.message?.trim() || event.home_message?.trim() || `Wishing you a joyful ${event.title} from the Ikshana family.`;
+  const defaultSpecialMessages = [
+    `Wishing you a joyful ${event.title} from the Ikshana family.`,
+    `Celebrating ${event.title} with gratitude, joy and togetherness.`,
+    `Warm wishes from everyone at Ikshana on ${event.title}.`,
+  ];
+  const specialAnnouncements = homeMessage
+    ? [homeMessage]
+    : [activeSlide?.message?.trim(), ...defaultSpecialMessages].filter(Boolean) as string[];
+  const announcementMessages = specialDay ? specialAnnouncements : ANNOUNCEMENTS;
+  const displayedAnnouncement = announcementMessages[announcementIndex % announcementMessages.length] || "";
 
   return (
     <section id="upcoming-event" aria-labelledby="upcoming-event-title" className="bg-[#fffcfc] px-4 pb-2 pt-2 sm:px-6 sm:pb-3 sm:pt-3 lg:pt-4">
@@ -98,29 +114,22 @@ export default function EventSpotlight() {
         {...(reduceMotion ? {} : { initial: { opacity: 0, y: 14 }, whileInView: { opacity: 1, y: 0 }, viewport: { once: true, amount: 0.05 }, transition: { duration: 0.5 } })}
         className="mx-auto max-w-6xl overflow-hidden rounded-[2rem] border border-brand-maroon/12 bg-white shadow-[0_28px_80px_-48px_rgba(122,31,45,.38)]"
       >
-        <div className={`relative overflow-hidden border-b border-brand-maroon/10 px-5 py-4 sm:px-8 sm:py-5 ${specialDay ? "bg-[radial-gradient(circle_at_12%_50%,rgba(122,31,45,.10),transparent_30%),radial-gradient(circle_at_88%_20%,rgba(196,145,82,.10),transparent_24%),linear-gradient(135deg,#fff9f5,#fff) ]" : "bg-[radial-gradient(circle_at_0%_50%,rgba(122,31,45,.10),transparent_30%),linear-gradient(135deg,#fff9f5,#fff) ]"}`}>
+        <div className="relative overflow-hidden border-b border-brand-maroon/10 bg-white px-5 py-4 sm:px-8 sm:py-5">
           <div className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-brand-maroon" />
           <div className="relative flex items-center gap-4 sm:gap-5">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-maroon text-white shadow-[0_12px_30px_-14px_rgba(122,31,45,.95)] sm:h-13 sm:w-13">
-              {specialDay ? <Sparkles size={19} /> : <Megaphone size={19} />}
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-brand-maroon shadow-sm ring-1 ring-brand-maroon/10 sm:h-13 sm:w-13">
+              {specialDay ? getSpecialDayIcon(event.title) : <Megaphone size={19} />}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] font-bold uppercase tracking-[0.32em] text-brand-maroon sm:text-[10px]">{specialDay ? "From the Ikshana family" : "Upcoming Event"}</p>
-              <div className="relative mt-1 min-h-[1.65rem] overflow-hidden" aria-live="polite">
+              <p className="text-[9px] font-bold uppercase tracking-[0.32em] text-brand-maroon/55 sm:text-[10px]">{specialDay ? "From the Ikshana family" : "Upcoming Event"}</p>
+              <div className="relative mt-1 min-h-[1.75rem] overflow-hidden" aria-live="polite">
                 <AnimatePresence mode="wait" initial={false}>
-                  <motion.p key={`${specialDay ? "special" : "event"}-${announcementIndex}`} initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }} transition={{ duration: 0.28 }} className="font-serif text-lg font-medium italic leading-relaxed text-brand-maroon/80 sm:text-xl lg:text-[1.4rem] xl:text-[1.5rem]">
-                    {specialDay
-                      ? [
-                          specialMessage,
-                          `Celebrating ${event.title} with gratitude, joy and togetherness.`,
-                          `Warm wishes from everyone at Ikshana on ${event.title}.`,
-                        ][announcementIndex]
-                      : ANNOUNCEMENTS[announcementIndex]}
+                  <motion.p key={`${specialDay ? "special" : "event"}-${announcementIndex}`} initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -6 }} transition={{ duration: 0.22 }} className="font-serif text-base font-medium italic leading-7 text-brand-maroon sm:text-lg lg:text-xl">
+                    {displayedAnnouncement}
                   </motion.p>
                 </AnimatePresence>
               </div>
             </div>
-
           </div>
         </div>
 
@@ -161,29 +170,38 @@ export default function EventSpotlight() {
               );
             }
             return (
-          <div className="grid lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
-            {event.poster_url ? (
-              <div className="flex items-center justify-center bg-white p-2 sm:p-3 lg:border-r lg:border-brand-maroon/10">
-                <PosterDisplay src={event.poster_url} alt={`Poster for ${event.title}`} compact />
-              </div>
-            ) : <div className="flex min-h-[240px] items-center justify-center bg-brand-cream/30 lg:border-r lg:border-brand-maroon/10"><EmptyPoster /></div>}
+              <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+                {event.poster_url ? (
+                  <div className="flex items-center justify-center bg-[#fffaf8] p-4 sm:p-6 lg:border-r lg:border-brand-maroon/10 lg:p-7">
+                    <PosterDisplay src={event.poster_url} alt={`Poster for ${event.title}`} compact />
+                  </div>
+                ) : <div className="flex min-h-[240px] items-center justify-center bg-brand-cream/20 lg:border-r lg:border-brand-maroon/10"><EmptyPoster /></div>}
 
-            <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7 lg:p-9">
-              {summary && <div className="flex items-start gap-3 rounded-[1.25rem] border border-brand-maroon/10 bg-brand-cream/35 p-4 sm:p-5"><span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-brand-maroon shadow-sm"><Megaphone size={18} /></span><p className="max-w-2xl font-serif text-lg font-medium italic leading-relaxed text-brand-maroon/80 sm:text-xl lg:text-[1.4rem] xl:text-[1.5rem]">{summary}</p></div>}
-              {description && description !== summary && <div className="mt-4 flex items-start gap-3 rounded-[1.25rem] border border-brand-maroon/8 bg-white p-4 sm:p-5"><span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-cream text-brand-maroon"><FileText size={18} /></span><p className="whitespace-pre-line text-base leading-relaxed text-stone-600 sm:text-lg lg:text-xl">{description}</p></div>}
-              <dl className="mt-5 grid gap-3 sm:grid-cols-2">
-                {when && <Info icon={<CalendarDays size={17} />} label="When" value={when} />}
-                {event.venue && <Info icon={<MapPin size={17} />} label="Where" value={event.venue} />}
-                {fee > 0 && <Info icon={<IndianRupee size={17} />} label="Registration" value={`₹${fee.toLocaleString("en-IN")}`} />}
-                {event.capacity && <Info icon={<Users size={17} />} label="Capacity" value={`${event.capacity} registrations`} />}
-              </dl>
-              {fee > 0 && event.fee_note && <p className="mt-3 rounded-xl bg-brand-cream/50 px-3 py-2.5 text-xs leading-5 text-brand-maroon/70">{event.fee_note}</p>}
-              {(event.contact_email || event.contact_phone) && <ContactBlock email={event.contact_email} phone={event.contact_phone} />}
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                {canRegister && event.registration_url ? <a href={event.registration_url} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-brand-maroon px-6 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-lg shadow-brand-maroon/15 transition hover:-translate-y-0.5 hover:bg-stone-900">{event.registration_link_label?.trim() || "Register for this event"} <ExternalLink size={15} /></a> : canRegister ? <Link to={`/events/${event.slug}`} state={{ featuredEvent: event }} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-brand-maroon px-6 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-lg shadow-brand-maroon/15 transition hover:-translate-y-0.5 hover:bg-stone-900">Register for this event <ArrowRight size={15} /></Link> : <span className="inline-flex min-h-11 items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-cream/45 px-5 text-[10px] font-bold uppercase tracking-[0.18em] text-brand-maroon"><Clock3 size={15} /> {event.status === "closed" ? "Registration closed" : "Registration opens soon"}</span>}
+                <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7 lg:p-9 xl:p-10">
+                  {summary && <ContentBlock icon={<Megaphone size={17} />} label="Short announcement" text={summary} prominent />}
+
+                  {description && description !== summary && <ContentBlock icon={<FileText size={17} />} label="About this event" text={description} separated={Boolean(summary)} />}
+
+                  <dl className="mt-6 grid gap-x-6 gap-y-0 sm:grid-cols-2">
+                    {when && <Info icon={<CalendarDays size={17} />} label="When" value={when} />}
+                    {event.venue && <Info icon={<MapPin size={17} />} label="Where" value={event.venue} />}
+                    {fee > 0 && <Info icon={<IndianRupee size={17} />} label="Registration" value={`₹${fee.toLocaleString("en-IN")}`} />}
+                    {event.capacity && <Info icon={<Users size={17} />} label="Capacity" value={`${event.capacity} registrations`} />}
+                  </dl>
+
+                  {fee > 0 && event.fee_note && (
+                    <div className="mt-4 border-t border-brand-maroon/10 pt-4">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/70">Fee note</p>
+                      <p className="mt-1.5 text-sm leading-6 text-stone-600">{event.fee_note}</p>
+                    </div>
+                  )}
+                  {(event.contact_email || event.contact_phone) && <ContactBlock email={event.contact_email} phone={event.contact_phone} />}
+
+                  <div className="mt-6 flex justify-center">
+                    {canRegister && event.registration_url ? <a href={event.registration_url} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-brand-maroon px-7 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-[0_12px_28px_-12px_rgba(122,31,45,.65)] transition hover:-translate-y-0.5 hover:bg-stone-900">{event.registration_link_label?.trim() || "Register for this event"} <ExternalLink size={15} /></a> : canRegister ? <Link to={`/events/${event.slug}`} state={{ featuredEvent: event }} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-brand-maroon px-7 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-[0_12px_28px_-12px_rgba(122,31,45,.65)] transition hover:-translate-y-0.5 hover:bg-stone-900">Register for this event <ArrowRight size={15} /></Link> : <span className="inline-flex min-h-11 items-center gap-2 rounded-full border border-brand-maroon/15 bg-brand-cream/45 px-5 text-[10px] font-bold uppercase tracking-[0.18em] text-brand-maroon"><Clock3 size={15} /> {event.status === "closed" ? "Registration closed" : "Registration opens soon"}</span>}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
             );
           })()
         )}
@@ -192,24 +210,55 @@ export default function EventSpotlight() {
   );
 }
 
+function getSpecialDayIcon(title: string): ReactNode {
+  const value = title.toLowerCase();
+  if (value.includes("engineer")) return <Wrench size={19} />;
+  if (value.includes("teacher") || value.includes("education")) return <GraduationCap size={19} />;
+  if (value.includes("ganesh") || value.includes("ganesha") || value.includes("vinayak")) return <Flower2 size={19} />;
+  if (value.includes("independence") || value.includes("republic") || value.includes("national")) return <Flag size={19} />;
+  if (value.includes("birthday")) return <Cake size={19} />;
+  return <PartyPopper size={19} />;
+}
+
 function ContactBlock({ email, phone }: { email?: string | null; phone?: string | null }) {
-  return <div className="mt-4 rounded-[1.25rem] border border-brand-maroon/10 bg-[#fffcfc] p-3.5 sm:p-4">
-    <div className="flex items-center gap-2 text-brand-maroon"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-cream"><Megaphone size={13} /></span><span className="text-[9px] font-bold uppercase tracking-[0.2em]">Contact details</span></div>
-    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-      {email && <a className="flex min-w-0 items-center gap-2 rounded-xl bg-white px-3 py-2.5 text-xs font-medium text-brand-maroon hover:bg-brand-cream/40" href={`mailto:${email}`}><Mail size={14} className="shrink-0" /><span className="break-all">{email}</span></a>}
-      {phone && <a className="flex min-w-0 items-center gap-2 rounded-xl bg-white px-3 py-2.5 text-xs font-medium text-brand-maroon" href={`tel:${phone}`}><Phone size={14} className="shrink-0" /><span>{phone}</span></a>}
+  return <div className="mt-5 border-t border-brand-maroon/10 pt-5">
+    <div className="flex items-center gap-3">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-cream text-brand-maroon"><ContactRound size={17} /></span>
+      <span className="text-[9px] font-bold uppercase tracking-[0.22em] text-brand-maroon/75">Contact details</span>
+    </div>
+    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {email && <a className="flex min-h-11 min-w-0 items-center gap-2.5 rounded-xl border border-brand-maroon/8 bg-[#fffdfb] px-3.5 py-2.5 text-sm text-stone-700 transition hover:border-brand-maroon/15 hover:bg-brand-cream/25" href={`mailto:${email}`}><Mail size={15} className="shrink-0 text-brand-maroon" /><span className="break-all">{email}</span></a>}
+      {phone && <a className="flex min-h-11 min-w-0 items-center gap-2.5 rounded-xl border border-brand-maroon/8 bg-[#fffdfb] px-3.5 py-2.5 text-sm text-stone-700 transition hover:border-brand-maroon/15 hover:bg-brand-cream/25" href={`tel:${phone}`}><Phone size={15} className="shrink-0 text-brand-maroon" /><span>{phone}</span></a>}
+    </div>
+  </div>;
+}
+
+function ContentBlock({ icon, label, text, prominent = false, separated = false }: { icon: ReactNode; label: string; text: string; prominent?: boolean; separated?: boolean }) {
+  return <div className={`${separated ? "border-t border-brand-maroon/10 pt-6" : ""} flex items-start gap-3.5`}>
+    <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-cream text-brand-maroon">{icon}</span>
+    <div className="min-w-0 flex-1">
+      <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/70">{label}</p>
+      <p className={`${prominent ? "text-base sm:text-lg" : "text-[15px] sm:text-base"} mt-1.5 whitespace-pre-line leading-7 text-stone-700`}>{text}</p>
     </div>
   </div>;
 }
 
 function Info({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return <div className="rounded-[1.25rem] border border-brand-maroon/10 bg-[#fffcfc] p-4 sm:p-5"><div className="flex items-center gap-2 text-brand-maroon/60">{icon}<span className="text-[9px] font-bold uppercase tracking-[0.2em]">{label}</span></div><p className="mt-2 break-words text-base font-semibold leading-relaxed text-brand-maroon sm:text-lg">{value}</p></div>;
+  return <div className="border-b border-brand-maroon/10 py-4 first:pt-0 sm:[&:nth-child(2)]:pt-0">
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-cream text-brand-maroon">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-maroon/70">{label}</p>
+        <p className="mt-1.5 break-words whitespace-pre-line text-[15px] font-medium leading-6 text-stone-700 sm:text-base">{value}</p>
+      </div>
+    </div>
+  </div>;
 }
 
 function EmptyPoster() { return <div className="flex min-h-[230px] w-full items-center justify-center bg-brand-cream/30 text-brand-maroon/30"><Megaphone size={40} /></div>; }
 
 function PosterDisplay({ src, alt, compact = false, special = false, centered = false }: { src: string; alt: string; compact?: boolean; special?: boolean; centered?: boolean }) {
   return <div className={`relative isolate flex w-full items-center justify-center overflow-hidden bg-brand-cream/10 ${centered ? "max-w-2xl" : ""}`}>
-    <img src={src} alt={alt} loading="lazy" decoding="async" className={`relative z-10 block h-auto w-auto max-w-full rounded-[1.25rem] object-contain ${special ? "max-h-[500px]" : compact ? "max-h-[440px]" : "max-h-[540px]"}`} />
+    <img src={src} alt={alt} loading="eager" fetchPriority="high" decoding="async" className={`relative z-10 block h-auto w-auto max-w-full rounded-[1.25rem] object-contain ${special ? "max-h-[500px]" : compact ? "max-h-[440px]" : "max-h-[540px]"}`} />
   </div>;
 }
